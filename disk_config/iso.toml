@@ -1,3 +1,5 @@
+rootfs = "btrfs"
+
 [customizations.installer.kickstart]
 contents = """
 %post
