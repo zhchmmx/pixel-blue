@@ -2,6 +2,8 @@
 
 This repository is based on Universal Blue's official template and built as a Fedora Silverblue image for Pixelbook.
 
+This repository includes verified solutions from [WeirdTreeThing](https://github.com/WeirdTreeThing) and other respected contributors.
+
 Please note that this is just an experimental project; use it at your own risk.
 
 # How to Use
