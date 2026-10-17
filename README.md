@@ -21,7 +21,7 @@ For users from other countries and regions, please check our GitHub Release page
 If you understand what this option means, please use the command below.
 
 ``` bash
-sudo bootc switch --transport containers-storage ghcr.io/zhchmmx/pixel-blue:latest
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest
 ```
 
 After that, you may reboot your device to see the changes.
