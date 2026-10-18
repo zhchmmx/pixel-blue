@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - main
+      - stable
   schedule:
-    - cron: '05 10 * * *'  # 10:05am UTC everyday
+    - cron: '05 10 * * *'  # 10:05am UTC every day; scheduled runs use the default branch (latest)
   push:
     branches:
       - main
+      - stable
     paths-ignore:
       - '**/README.md'
   workflow_dispatch:
@@ -16,20 +18,14 @@ on:
 env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   build_push:
-    name: Build and push image (${{ matrix.stream }})
+    name: Build and push image
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        # latest: follows the upstream ublue-os latest image (bleeding edge)
-        # stable: follows the current Fedora GA release (see STABLE_FEDORA_VERSION)
-        stream: [latest, stable]
-
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ matrix.stream }}
-      cancel-in-progress: true
 
     permissions:
       contents: read
@@ -59,17 +55,34 @@ jobs:
 
           echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
 
-      - name: Resolve stream
-        id: resolve-stream
+      - name: Resolve channel
+        id: resolve-channel
         run: |
-          # Channel tag that users track (latest or stable)
-          echo "DEFAULT_TAG=${{ matrix.stream }}" >> $GITHUB_ENV
+          # A pull request is built for the branch it targets; pushes, the
+          # schedule and manual runs use the branch they run on.
+          REF="${{ github.base_ref }}"
+          [ -z "$REF" ] && REF="${GITHUB_REF_NAME}"
+
+          # main -> latest, stable branch -> stable
+          if [ "$REF" = "stable" ]; then
+            STREAM=stable
+          else
+            STREAM=latest
+          fi
+          echo "DEFAULT_TAG=${STREAM}" >> $GITHUB_ENV
 
           # Upstream base image tag this channel is built on
-          BASE_TAG=$(just generate-base-tag "${{ matrix.stream }}")
+          BASE_TAG=$(just generate-base-tag "${STREAM}")
           echo "BASE_TAG=${BASE_TAG}" >> $GITHUB_ENV
 
-          echo "Building '${DEFAULT_TAG}' channel from base tag '${BASE_TAG}'"
+          # Only main (latest) and the stable branch publish; pull requests never push.
+          PUSH_IMAGE=false
+          if [ "${{ github.event_name }}" != "pull_request" ] && { [ "$REF" = "main" ] || [ "$REF" = "stable" ]; }; then
+            PUSH_IMAGE=true
+          fi
+          echo "PUSH_IMAGE=${PUSH_IMAGE}" >> $GITHUB_ENV
+
+          echo "Building '${STREAM}' channel from base tag '${BASE_TAG}' (push: ${PUSH_IMAGE})"
 
       - name: Prepare environment
         run: |
@@ -129,14 +142,14 @@ jobs:
       # They also check if the runner is on the default branch so that things like the merge queue (if you enable it), are going to work
       - name: Login to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: env.PUSH_IMAGE == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push To GHCR
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: env.PUSH_IMAGE == 'true'
         id: push-image
         env:
           ALIAS_TAGS: ${{ steps.gen-build-tags.outputs.alias_tags }}
@@ -156,14 +169,14 @@ jobs:
       # to consume. For more details, review the image signing section of the README.
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: env.PUSH_IMAGE == 'true'
         with:
           # be careful when upgrading major versions
           cosign-release: 'v3.1.2'
 
       - name: Sign container image
         id: sign-image
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: env.PUSH_IMAGE == 'true'
         env:
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
