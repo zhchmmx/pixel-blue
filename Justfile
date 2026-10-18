@@ -7,7 +7,6 @@ export image_desc := env_var("IMAGE_DESC")
 export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
-export stable_fedora_version := env_var("STABLE_FEDORA_VERSION")
 export bib_image := env_var("BIB_IMAGE")
 
 alias build-vm := build-qcow2
@@ -94,12 +93,11 @@ sudoif command *args:
 #
 
 # Build the image using the specified parameters
-build $target_image=image_name $tag=default_tag $base_tag="latest":
+build $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
     set -euox pipefail
 
-    BUILD_ARGS=("--build-arg" "BASE_TAG={{ base_tag }}")
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -123,7 +121,7 @@ build $target_image=image_name $tag=default_tag $base_tag="latest":
     LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
 
     # This actually builds the image!
-    PODMAN_BUILD_ARGS=("${BUILD_ARGS[@]}" "${LABELS[@]}" --pull=newer --tag "${target_image}:${tag}" --file Containerfile)
+    PODMAN_BUILD_ARGS=("${LABELS[@]}" --pull=newer --tag "${target_image}:${tag}" --file Containerfile)
 
     podman build "${PODMAN_BUILD_ARGS[@]}" .
 
@@ -195,19 +193,6 @@ generate-default-tag $tag=default_tag:
 
     echo "${tag}"
 
-# Resolve the upstream base image tag for a channel
-# stable/testing -> STABLE_FEDORA_VERSION (Fedora GA), anything else -> latest
-[group('Utility')]
-generate-base-tag $stream="latest":
-    #!/usr/bin/env bash
-    set -eoux pipefail
-
-    if [[ "{{ stream }}" == "stable" || "{{ stream }}" == "testing" ]]; then
-        echo "{{ stable_fedora_version }}"
-    else
-        echo "latest"
-    fi
-
 # Generate Tags
 [group('Utility')]
 generate-build-tags $target_image=image_name $tag=default_tag:
@@ -222,7 +207,7 @@ generate-build-tags $target_image=image_name $tag=default_tag:
         BUILD_TAGS+=("${tag}-${GIT_SHA}")
     fi
 
-    # Moving channel tag (latest, stable or testing)
+    # Moving channel tag (latest or testing)
     BUILD_TAGS+=("${tag}")
 
     echo "${BUILD_TAGS[@]}"
