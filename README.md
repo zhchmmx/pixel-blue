@@ -18,7 +18,7 @@ For users from other countries and regions, please check our GitHub Release page
 
 ## Option 2: Switch to Pixel Blue
 
-Pixel Blue is published in two channels. Pick the one you want and use the matching command.
+Pixel Blue is published in three channels. Pick the one you want and use the matching command.
 
 ### Latest channel (default)
 
@@ -36,6 +36,14 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolic
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:stable --enforce-container-sigpolicy
 ```
 
+### Testing channel (preview of stable)
+
+`testing` builds on the same Fedora GA release as `stable` and receives changes first, so it previews what `stable` will get next. It can be less stable than `stable`; use it if you want to try upcoming changes early.
+
+``` bash
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy
+```
+
 ### Pinning to a specific build
 
 Every build is also published with a commit-based tag, so you can freeze to an exact build:
@@ -44,9 +52,9 @@ Every build is also published with a commit-based tag, so you can freeze to an e
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit> --enforce-container-sigpolicy
 ```
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`stable` or `latest`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
+After that, you may reboot your device to see the changes. Users on a moving channel (`latest`, `stable` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
 
-> For maintainers: the `stable` channel builds on the Fedora version set by `STABLE_FEDORA_VERSION` in `image-template.env`. Bump it to the new Fedora GA version to roll `stable` forward.
+> For maintainers: the `stable` and `testing` channels build on the Fedora version set by `STABLE_FEDORA_VERSION` in `image-template.env`. Bump it to the new Fedora GA version to roll both forward. Changes flow by branch: land in `main` (published as `latest`), cherry-pick into `testing` for a first check on the GA base, then merge into `stable` to publish.
 
 # Learn More
 
