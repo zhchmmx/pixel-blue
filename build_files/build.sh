@@ -11,7 +11,7 @@ cp -avf "/ctx/system_files"/. /
 # RPMfusion repos are available by default in ublue main images
 
 # Install base packages from fedora repos
-dnf5 install -y git git-credential-manager
+dnf5 install -y git git-credential-oauth
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
