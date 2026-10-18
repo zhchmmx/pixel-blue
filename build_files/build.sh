@@ -91,38 +91,42 @@ cat > /etc/keyd/cros.conf << 'EOF'
 0001:0001
 
 [main]
-f1 = back
-f2 = refresh
-f3 = f11
-f4 = scale
-f5 = brightnessdown
-f6 = brightnessup
-f7 = playpause
-f8 = mute
-f9 = volumedown
-f10 = volumeup
-f13 = f13
+# Pixelbook (eve) top-row keys natively emit media keys, not F1-F10:
+#   esc, back, refresh, zoom, scale, brightnessdown, brightnessup,
+#   playpause, mute, volumedown, volumeup, sleep
+# No remapping is needed in the main layer; they pass through as-is.
+#
+# keyd auto-binds modifier keys to their eponymous layers, but the
+# bindings are declared explicitly here for clarity.
+zoom = f11
+sleep = f12
+meta = layer(meta)
+control = layer(control)
+leftalt = layer(alt)
+rightalt = layer(altgr)
+shift = layer(shift)
 
 [meta]
-f1 = f1
-f2 = f2
-f3 = f3
-f4 = f4
-f5 = f5
-f6 = f6
-f7 = f7
-f8 = f8
-f9 = f9
-f10 = f10
-f13 = f13
+# Hold Meta (Search) to use the top-row keys as F1-F10.
+back = f1
+refresh = f2
+zoom = f3
+scale = f4
+brightnessdown = f5
+brightnessup = f6
+playpause = f7
+mute = f8
+volumedown = f9
+volumeup = f10
+sleep = f13
 
 [alt]
 backspace = delete
-f5 = kbdillumdown
-f6 = kbdillumup
+brightnessdown = kbdillumdown
+brightnessup = kbdillumup
 
 [control]
-f5 = print
+brightnessdown = print
 
 [control+alt]
 backspace = C-A-delete
