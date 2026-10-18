@@ -10,7 +10,7 @@ COPY build_files /
 COPY system_files /system_files
 
 # Base Image
-FROM ghcr.io/ublue-os/silverblue-main:${BASE_TAG}
+FROM quay.io/fedora/fedora-silverblue:${BASE_TAG}
 ## Other possible base images include:
 # FROM ghcr.io/ublue-os/bazzite:testing
 # FROM ghcr.io/ublue-os/aurora:stable

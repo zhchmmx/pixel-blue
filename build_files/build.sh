@@ -11,7 +11,7 @@ cp -avf "/ctx/system_files"/. /
 # RPMfusion repos are available by default in ublue main images
 
 # Install base packages from fedora repos
-dnf5 install -y git
+dnf5 install -y git git-credential-oauth
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
@@ -148,11 +148,9 @@ AttrKeyboardIntegration=internal
 ModelTabletModeNoSuspend=1
 EOF
 
-# Enable keyd service
-systemctl enable keyd
 
 #### Enable system services
-
+systemctl enable keyd
 systemctl enable podman.socket
 
 # Clean up dnf cache to reduce image size
