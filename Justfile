@@ -9,6 +9,7 @@ export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export stable_fedora_version := env_var("STABLE_FEDORA_VERSION")
 export bib_image := env_var("BIB_IMAGE")
+export jasonn3_image := env_var("JASONN3_IMAGE")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -380,6 +381,9 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="44": (_rootful_load_image target_image tag)
     #!/usr/bin/env bash
     set -euox pipefail
+    # jasonn3 wants the bare image name; strip the localhost/ prefix
+    image_name="{{ target_image }}"
+    image_name="${image_name#localhost/}"
     mkdir -p build
     sudo podman run \
       --rm \
@@ -389,7 +393,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="4
       --volume /var/lib/containers/storage:/var/lib/containers/storage \
       --security-opt label=type:unconfined_t \
       "{{ jasonn3_image }}" \
-      IMAGE_NAME="{{ replace(target_image, 'localhost/', '') }}" \
+      IMAGE_NAME="${image_name}" \
       IMAGE_REPO="ghcr.io/{{ repo_organization }}" \
       IMAGE_SRC="containers-storage:{{ target_image }}:{{ tag }}" \
       IMAGE_TAG="{{ tag }}" \
