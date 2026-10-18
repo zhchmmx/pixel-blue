@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - stable
+      - testing
   schedule:
     - cron: '05 10 * * *'  # 10:05am UTC every day; scheduled runs use the default branch (latest)
   push:
     branches:
       - main
       - stable
+      - testing
     paths-ignore:
       - '**/README.md'
   workflow_dispatch:
@@ -63,21 +65,24 @@ jobs:
           REF="${{ github.base_ref }}"
           [ -z "$REF" ] && REF="${GITHUB_REF_NAME}"
 
-          # main -> latest, stable branch -> stable
-          if [ "$REF" = "stable" ]; then
-            STREAM=stable
-          else
-            STREAM=latest
-          fi
+          # Channel is taken from the branch name:
+          #   main    -> latest
+          #   stable  -> stable
+          #   testing -> testing
+          # Any other branch falls back to latest.
+          case "$REF" in
+            stable|testing) STREAM="$REF" ;;
+            *)              STREAM=latest ;;
+          esac
           echo "DEFAULT_TAG=${STREAM}" >> $GITHUB_ENV
 
           # Upstream base image tag this channel is built on
           BASE_TAG=$(just generate-base-tag "${STREAM}")
           echo "BASE_TAG=${BASE_TAG}" >> $GITHUB_ENV
 
-          # Only main (latest) and the stable branch publish; pull requests never push.
+          # main, stable and testing publish; pull requests never push.
           PUSH_IMAGE=false
-          if [ "${{ github.event_name }}" != "pull_request" ] && { [ "$REF" = "main" ] || [ "$REF" = "stable" ]; }; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && { [ "$REF" = "main" ] || [ "$REF" = "stable" ] || [ "$REF" = "testing" ]; }; then
             PUSH_IMAGE=true
           fi
           echo "PUSH_IMAGE=${PUSH_IMAGE}" >> $GITHUB_ENV

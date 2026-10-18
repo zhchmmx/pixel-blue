@@ -196,13 +196,13 @@ generate-default-tag $tag=default_tag:
     echo "${tag}"
 
 # Resolve the upstream base image tag for a channel
-# latest -> latest, stable -> STABLE_FEDORA_VERSION
+# stable/testing -> STABLE_FEDORA_VERSION (Fedora GA), anything else -> latest
 [group('Utility')]
 generate-base-tag $stream="latest":
     #!/usr/bin/env bash
     set -eoux pipefail
 
-    if [[ "{{ stream }}" == "stable" ]]; then
+    if [[ "{{ stream }}" == "stable" || "{{ stream }}" == "testing" ]]; then
         echo "{{ stable_fedora_version }}"
     else
         echo "latest"
@@ -222,7 +222,7 @@ generate-build-tags $target_image=image_name $tag=default_tag:
         BUILD_TAGS+=("${tag}-${GIT_SHA}")
     fi
 
-    # Moving channel tag (latest or stable)
+    # Moving channel tag (latest, stable or testing)
     BUILD_TAGS+=("${tag}")
 
     echo "${BUILD_TAGS[@]}"
