@@ -4,13 +4,13 @@ on:
   pull_request:
     branches:
       - main
-      - stable
+      - testing
   schedule:
     - cron: '05 10 * * *'  # 10:05am UTC every day; scheduled runs use the default branch (latest)
   push:
     branches:
       - main
-      - stable
+      - testing
     paths-ignore:
       - '**/README.md'
   workflow_dispatch:
@@ -63,26 +63,22 @@ jobs:
           REF="${{ github.base_ref }}"
           [ -z "$REF" ] && REF="${GITHUB_REF_NAME}"
 
-          # main -> latest, stable branch -> stable
-          if [ "$REF" = "stable" ]; then
-            STREAM=stable
+          # main -> latest, testing branch -> testing
+          if [ "$REF" = "testing" ]; then
+            STREAM=testing
           else
             STREAM=latest
           fi
           echo "DEFAULT_TAG=${STREAM}" >> $GITHUB_ENV
 
-          # Upstream base image tag this channel is built on
-          BASE_TAG=$(just generate-base-tag "${STREAM}")
-          echo "BASE_TAG=${BASE_TAG}" >> $GITHUB_ENV
-
-          # Only main (latest) and the stable branch publish; pull requests never push.
+          # Only main (latest) and the testing branch publish; pull requests never push.
           PUSH_IMAGE=false
-          if [ "${{ github.event_name }}" != "pull_request" ] && { [ "$REF" = "main" ] || [ "$REF" = "stable" ]; }; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && { [ "$REF" = "main" ] || [ "$REF" = "testing" ]; }; then
             PUSH_IMAGE=true
           fi
           echo "PUSH_IMAGE=${PUSH_IMAGE}" >> $GITHUB_ENV
 
-          echo "Building '${STREAM}' channel from base tag '${BASE_TAG}' (push: ${PUSH_IMAGE})"
+          echo "Building '${STREAM}' channel (push: ${PUSH_IMAGE})"
 
       - name: Prepare environment
         run: |
@@ -96,8 +92,7 @@ jobs:
         run: |
           just build \
             ${IMAGE_NAME} \
-            ${DEFAULT_TAG} \
-            ${BASE_TAG}
+            ${DEFAULT_TAG}
 
       # This is optional, this provides smaller delta updates
       - name: Rechunk with rpm-ostree
