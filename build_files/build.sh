@@ -98,6 +98,8 @@ cat > /etc/keyd/cros.conf << 'EOF'
 #
 # keyd auto-binds modifier keys to their eponymous layers, but the
 # bindings are declared explicitly here for clarity.
+zoom = f11
+sleep = f12
 meta = layer(meta)
 control = layer(control)
 leftalt = layer(alt)
