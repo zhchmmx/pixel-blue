@@ -18,7 +18,7 @@ For users from other countries and regions, please check our GitHub Release page
 
 ## Option 2: Switch to Pixel Blue
 
-Pixel Blue is published in two channels. Pick the one you want and use the matching command.
+Pixel Blue is published in three channels. Pick the one you want and use the matching command.
 
 ### Latest channel (default)
 
@@ -31,6 +31,14 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolic
 ### Testing channel
 
 `testing` is the preview channel for `latest`. It is built from the same upstream `latest` base, so it only differs by the changes that are being validated before they land in `latest`. Use it if you want to test upcoming changes early.
+
+``` bash
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy
+```
+
+### Testing channel (preview of stable)
+
+`testing` builds on the same Fedora GA release as `stable` and receives changes first, so it previews what `stable` will get next. It can be less stable than `stable`; use it if you want to try upcoming changes early.
 
 ``` bash
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy

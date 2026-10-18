@@ -11,12 +11,36 @@ cp -avf "/ctx/system_files"/. /
 # RPMfusion repos are available by default in ublue main images
 
 # Install base packages from fedora repos
-dnf5 install -y git
+dnf5 install -y git git-credential-oauth
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
+
+### Flatpak repositories
+#
+# Upstream (fedora-silverblue) ships flatpak-add-fedora-repos.service, enabled
+# via a systemd preset. On first boot it registers the Fedora flatpak registry
+# (oci+https://registry.fedoraproject.org) plus a disabled fedora-testing
+# remote. Mask the service so those are never added. The Flathub remote
+# shipped at system_files/etc/flatpak/remotes.d/flathub.flatpakrepo (copied to
+# /etc/flatpak/remotes.d/ at the top of this script) is registered by
+# flatpak-system-helper instead.
+# Note: this only affects fresh deployments of this image; an existing install
+# that already added the Fedora remotes keeps them under /var/lib/flatpak.
+
+ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
+
+### Remove Firefox
+#
+# Upstream ships Firefox as an RPM (firefox + firefox-langpacks) baked into
+# the base ostree commit and installed into read-only /usr, where it cannot
+# be removed at runtime. Drop both packages from the image. Firefox stays
+# available to users via Flathub (flatpak install flathub org.mozilla.firefox)
+# or rpm-ostree/bootc layering.
+
+dnf5 remove -y firefox firefox-langpacks
 
 ### Audio configuration for Pixelbook (eve)
 #
@@ -91,38 +115,42 @@ cat > /etc/keyd/cros.conf << 'EOF'
 0001:0001
 
 [main]
-f1 = back
-f2 = refresh
-f3 = f11
-f4 = scale
-f5 = brightnessdown
-f6 = brightnessup
-f7 = playpause
-f8 = mute
-f9 = volumedown
-f10 = volumeup
-f13 = f13
+# Pixelbook (eve) top-row keys natively emit media keys, not F1-F10:
+#   esc, back, refresh, zoom, scale, brightnessdown, brightnessup,
+#   playpause, mute, volumedown, volumeup, sleep
+# No remapping is needed in the main layer; they pass through as-is.
+#
+# keyd auto-binds modifier keys to their eponymous layers, but the
+# bindings are declared explicitly here for clarity.
+zoom = f11
+sleep = f12
+meta = layer(meta)
+control = layer(control)
+leftalt = layer(alt)
+rightalt = layer(altgr)
+shift = layer(shift)
 
 [meta]
-f1 = f1
-f2 = f2
-f3 = f3
-f4 = f4
-f5 = f5
-f6 = f6
-f7 = f7
-f8 = f8
-f9 = f9
-f10 = f10
-f13 = f13
+# Hold Meta (Search) to use the top-row keys as F1-F10.
+back = f1
+refresh = f2
+zoom = f3
+scale = f4
+brightnessdown = f5
+brightnessup = f6
+playpause = f7
+mute = f8
+volumedown = f9
+volumeup = f10
+sleep = f13
 
 [alt]
 backspace = delete
-f5 = kbdillumdown
-f6 = kbdillumup
+brightnessdown = kbdillumdown
+brightnessup = kbdillumup
 
 [control]
-f5 = print
+brightnessdown = print
 
 [control+alt]
 backspace = C-A-delete
@@ -144,11 +172,9 @@ AttrKeyboardIntegration=internal
 ModelTabletModeNoSuspend=1
 EOF
 
-# Enable keyd service
-systemctl enable keyd
 
 #### Enable system services
-
+systemctl enable keyd
 systemctl enable podman.socket
 
 # Clean up dnf cache to reduce image size
