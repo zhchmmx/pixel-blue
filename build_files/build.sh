@@ -18,6 +18,30 @@ dnf5 install -y git git-credential-oauth
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
 
+### Flatpak repositories
+#
+# Upstream (fedora-silverblue) ships flatpak-add-fedora-repos.service, enabled
+# via a systemd preset. On first boot it registers the Fedora flatpak registry
+# (oci+https://registry.fedoraproject.org) plus a disabled fedora-testing
+# remote. Mask the service so those are never added. The Flathub remote
+# shipped at system_files/etc/flatpak/remotes.d/flathub.flatpakrepo (copied to
+# /etc/flatpak/remotes.d/ at the top of this script) is registered by
+# flatpak-system-helper instead.
+# Note: this only affects fresh deployments of this image; an existing install
+# that already added the Fedora remotes keeps them under /var/lib/flatpak.
+
+ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
+
+### Remove Firefox
+#
+# Upstream ships Firefox as an RPM (firefox + firefox-langpacks) baked into
+# the base ostree commit and installed into read-only /usr, where it cannot
+# be removed at runtime. Drop both packages from the image. Firefox stays
+# available to users via Flathub (flatpak install flathub org.mozilla.firefox)
+# or rpm-ostree/bootc layering.
+
+dnf5 remove -y firefox firefox-langpacks
+
 ### Audio configuration for Pixelbook (eve)
 #
 # Pixelbook (eve) uses Intel Kaby Lake with the AVS audio driver.
