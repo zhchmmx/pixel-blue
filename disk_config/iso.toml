@@ -1,7 +1,7 @@
 [customizations.installer.kickstart]
 contents = """
 %post
-bootc switch --mutate-in-place --transport registry ghcr.io/zhchmmx/pixel-blue:stable
+bootc switch --mutate-in-place --transport registry ghcr.io/zhchmmx/pixel-blue:latest
 %end
 """
 

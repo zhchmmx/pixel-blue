@@ -20,20 +20,20 @@ For users from other countries and regions, please check our GitHub Release page
 
 Pixel Blue is published in two channels. Pick the one you want and use the matching command.
 
-### Stable channel (recommended)
+### Latest channel (default)
 
-`stable` follows the current Fedora GA release, which is the version you would download from the official Fedora website. It only moves to a newer Fedora after that release has been declared stable.
-
-``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:stable --enforce-container-sigpolicy
-```
-
-### Latest channel
-
-`latest` follows the upstream Universal Blue `latest` image and always tracks the newest Fedora, at the cost of stability.
+`latest` follows the upstream Universal Blue `latest` image and always tracks the newest Fedora.
 
 ``` bash
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolicy
+```
+
+### Stable channel
+
+`stable` builds on the current Fedora GA release, which is the version you would download from the official Fedora website. It only moves to a newer Fedora after that release has been declared stable.
+
+``` bash
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:stable --enforce-container-sigpolicy
 ```
 
 ### Pinning to a specific build
@@ -41,7 +41,7 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolic
 Every build is also published with a commit-based tag, so you can freeze to an exact build:
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:stable-<commit> --enforce-container-sigpolicy
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit> --enforce-container-sigpolicy
 ```
 
 After that, you may reboot your device to see the changes. Users on a moving channel (`stable` or `latest`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
