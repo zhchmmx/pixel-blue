@@ -7,6 +7,7 @@ export image_desc := env_var("IMAGE_DESC")
 export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
+export stable_fedora_version := env_var("STABLE_FEDORA_VERSION")
 export bib_image := env_var("BIB_IMAGE")
 
 alias build-vm := build-qcow2
@@ -93,12 +94,12 @@ sudoif command *args:
 #
 
 # Build the image using the specified parameters
-build $target_image=image_name $tag=default_tag:
+build $target_image=image_name $tag=default_tag $base_tag="latest":
     #!/usr/bin/env bash
 
     set -euox pipefail
 
-    BUILD_ARGS=()
+    BUILD_ARGS=("--build-arg" "BASE_TAG={{ base_tag }}")
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -106,7 +107,7 @@ build $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
         LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
-        LABELS+=("--label" "org.opencontainers.image.version={{ default_tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
     fi
 
     # Image metadata for https://artifacthub.io/ - This is optional but is highly recommended so we all can get a index of all the custom images
@@ -194,24 +195,35 @@ generate-default-tag $tag=default_tag:
 
     echo "${tag}"
 
+# Resolve the upstream base image tag for a channel
+# latest -> latest, stable -> STABLE_FEDORA_VERSION
+[group('Utility')]
+generate-base-tag $stream="latest":
+    #!/usr/bin/env bash
+    set -eoux pipefail
+
+    if [[ "{{ stream }}" == "stable" ]]; then
+        echo "{{ stable_fedora_version }}"
+    else
+        echo "latest"
+    fi
+
 # Generate Tags
 [group('Utility')]
 generate-build-tags $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
     set -eoux pipefail
 
-    DATE=$(date +%Y%m%d)
     BUILD_TAGS=()
+
+    # Commit-based pin tag, used to freeze a specific build
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
         BUILD_TAGS+=("${tag}-${GIT_SHA}")
-        BUILD_TAGS+=("${tag}-${DATE}-${GIT_SHA}")
-        BUILD_TAGS+=("${DATE}-${GIT_SHA}")
     fi
 
-    BUILD_TAGS+=("${DATE}")
+    # Moving channel tag (latest or stable)
     BUILD_TAGS+=("${tag}")
-    BUILD_TAGS+=("${tag}-${DATE}")
 
     echo "${BUILD_TAGS[@]}"
 

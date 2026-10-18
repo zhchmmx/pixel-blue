@@ -16,14 +16,20 @@ on:
 env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ inputs.brand_name}}-${{ inputs.stream_name }}
-  cancel-in-progress: true
-
 jobs:
   build_push:
-    name: Build and push image
+    name: Build and push image (${{ matrix.stream }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # latest: follows the upstream ublue-os latest image (bleeding edge)
+        # stable: follows the current Fedora GA release (see STABLE_FEDORA_VERSION)
+        stream: [latest, stable]
+
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ matrix.stream }}
+      cancel-in-progress: true
 
     permissions:
       contents: read
@@ -53,12 +59,17 @@ jobs:
 
           echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
 
-      - name: Default Tag
-        id: gen-default-tag
+      - name: Resolve stream
+        id: resolve-stream
         run: |
-          DEFAULT_TAG=$(just generate-default-tag)
+          # Channel tag that users track (latest or stable)
+          echo "DEFAULT_TAG=${{ matrix.stream }}" >> $GITHUB_ENV
 
-          echo "DEFAULT_TAG=${DEFAULT_TAG}" >> $GITHUB_ENV
+          # Upstream base image tag this channel is built on
+          BASE_TAG=$(just generate-base-tag "${{ matrix.stream }}")
+          echo "BASE_TAG=${BASE_TAG}" >> $GITHUB_ENV
+
+          echo "Building '${DEFAULT_TAG}' channel from base tag '${BASE_TAG}'"
 
       - name: Prepare environment
         run: |
@@ -72,7 +83,8 @@ jobs:
         run: |
           just build \
             ${IMAGE_NAME} \
-            ${DEFAULT_TAG}
+            ${DEFAULT_TAG} \
+            ${BASE_TAG}
 
       # This is optional, this provides smaller delta updates
       - name: Rechunk with rpm-ostree
@@ -161,4 +173,3 @@ jobs:
           # https://github.com/coreos/rpm-ostree/issues/5509
           # use old bundle format, so we can use newer cosign 3.X.X instead of 2.X.X
           cosign sign -y --new-bundle-format=false --use-signing-config=false --key env://COSIGN_PRIVATE_KEY ${IMAGE_REGISTRY}/${IMAGE_NAME}@${DIGEST}
-

@@ -4,7 +4,11 @@ COPY build_files /
 COPY system_files /system_files
 
 # Base Image
-FROM ghcr.io/ublue-os/silverblue-main:latest
+# BASE_TAG selects the upstream stream the image is built on:
+#   latest        -> follows ublue-os latest (bleeding edge)
+#   <Fedora GA#>  -> e.g. 44, for the stable channel
+ARG BASE_TAG=latest
+FROM ghcr.io/ublue-os/silverblue-main:${BASE_TAG}
 ## Other possible base images include:
 # FROM ghcr.io/ublue-os/bazzite:testing
 # FROM ghcr.io/ublue-os/aurora:stable
