@@ -28,12 +28,12 @@ Pixel Blue is published in three channels. Pick the one you want and use the mat
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolicy
 ```
 
-### Stable channel
+### Testing channel
 
-`stable` builds on the current Fedora GA release, which is the version you would download from the official Fedora website. It only moves to a newer Fedora after that release has been declared stable.
+`testing` is the preview channel for `latest`. It is built from the same upstream `latest` base, so it only differs by the changes that are being validated before they land in `latest`. Use it if you want to test upcoming changes early.
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:stable --enforce-container-sigpolicy
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy
 ```
 
 ### Testing channel (preview of stable)
@@ -52,9 +52,9 @@ Every build is also published with a commit-based tag, so you can freeze to an e
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit> --enforce-container-sigpolicy
 ```
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest`, `stable` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
+After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
 
-> For maintainers: the `stable` and `testing` channels build on the Fedora version set by `STABLE_FEDORA_VERSION` in `image-template.env`. Bump it to the new Fedora GA version to roll both forward. Changes flow by branch: land in `main` (published as `latest`), cherry-pick into `testing` for a first check on the GA base, then merge into `stable` to publish.
+> For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
 
 # Learn More
 

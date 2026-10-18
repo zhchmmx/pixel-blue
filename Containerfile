@@ -1,16 +1,10 @@
-# BASE_TAG selects the upstream stream the image is built on:
-#   latest        -> follows ublue-os latest (bleeding edge)
-#   <Fedora GA#>  -> e.g. 44, for the stable channel
-# Declared before the first FROM so every FROM below can use it.
-ARG BASE_TAG=latest
-
 # Allow build scripts to be referenced without being copied into the final image
 FROM scratch AS ctx
 COPY build_files /
 COPY system_files /system_files
 
 # Base Image
-FROM quay.io/fedora/fedora-silverblue:${BASE_TAG}
+FROM ghcr.io/ublue-os/silverblue-main:latest
 ## Other possible base images include:
 # FROM ghcr.io/ublue-os/bazzite:testing
 # FROM ghcr.io/ublue-os/aurora:stable
