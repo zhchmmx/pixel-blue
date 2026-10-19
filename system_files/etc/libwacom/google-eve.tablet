@@ -1,11 +1,11 @@
 # Google Pixelbook (eve) built-in Wacom AES digitizer
 # libwacom device entry so that GNOME recognizes the Pixelbook Pen.
-# TODO: fill in the real PID. On this machine run `sudo evtest`, select the
-#       Wacom digitizer device, read "product 0xXXXX", and replace 0000 below.
+# VID:PID verified from this machine's sysfs HID device:
+#   /sys/bus/hid/devices/0018:2D1F:5143.0001  (bus 0018 = I2C, VID 2D1F = Wacom embedded)
 [Device]
 Name=Google Pixelbook (eve) Digitizer
 ModelName=Pixelbook
-DeviceMatch=i2c:056a:0000
+DeviceMatch=i2c:2d1f:5143
 Class=ISDV4
 Width=10
 Height=7
