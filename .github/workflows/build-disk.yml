@@ -150,10 +150,26 @@ jobs:
         run: |
           set -euo pipefail
           # jasonn3 needs the Fedora version of the installer environment.
-          # Read it from the image label (e.g. "44.20261018.0" -> "44") so it
+          # Read it from the upstream base image label in Containerfile
           # tracks the base image instead of being pinned by hand.
-          REPO="${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}"
-          TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:${REPO}:pull&service=ghcr.io" | jq -r .token)
+          BASE_IMAGE=$(awk '/^FROM /{img=$2} END{print img}' Containerfile)
+          BASE_REF="${BASE_IMAGE%@*}"
+          BASE_REGISTRY="${BASE_REF%%/*}"
+          BASE_REPO_TAG="${BASE_REF#*/}"
+          BASE_REPO="${BASE_REPO_TAG%:*}"
+          BASE_TAG="${BASE_REPO_TAG##*:}"
+          if [ "${BASE_REPO}" = "${BASE_TAG}" ]; then
+            BASE_TAG="latest"
+          fi
+          REGISTRY_API="https://${BASE_REGISTRY}/v2/${BASE_REPO}"
+          AUTH_HEADER=()
+          if [ "${BASE_REGISTRY}" = "ghcr.io" ]; then
+            TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:${BASE_REPO}:pull&service=ghcr.io" | jq -r .token)
+            AUTH_HEADER=(-H "Authorization: ******")
+          elif [ "${BASE_REGISTRY}" = "quay.io" ]; then
+            TOKEN=$(curl -sf "https://quay.io/v2/auth?service=quay.io&scope=repository:${BASE_REPO}:pull" | jq -r .token)
+            AUTH_HEADER=(-H "Authorization: ******")
+          fi
           AUTH="Authorization: Bearer ${TOKEN}"
           ACCEPT="Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json"
           MANIFEST=$(curl -sf -H "${AUTH}" -H "${ACCEPT}" "https://ghcr.io/v2/${REPO}/manifests/${DEFAULT_TAG}")
