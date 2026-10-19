@@ -3,7 +3,7 @@
 # "unknown device / may present wrong capabilities".
 # VID:PID verified from this machine's sysfs: /sys/bus/hid/devices/0018:2D1F:5143.0001
 [Device]
-Name=Google Pixelbook (eve) Digitizer
+Name=Google Pixelbook Pen
 ModelName=Pixelbook
 DeviceMatch=i2c|2d1f|5143
 Class=ISDV4
