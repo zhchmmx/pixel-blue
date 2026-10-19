@@ -1,0 +1,20 @@
+# Google Pixelbook (eve) built-in Wacom AES digitizer (HID over I2C)
+# libwacom entry so GNOME recognizes the Pixelbook Pen and stops showing
+# "unknown device / may present wrong capabilities".
+# VID:PID verified from this machine's sysfs: /sys/bus/hid/devices/0018:2D1F:5143.0001
+[Device]
+Name=Google Pixelbook Pen
+ModelName=Pixelbook
+DeviceMatch=i2c|2d1f|5143
+Class=ISDV4
+Width=260
+Height=173
+IntegratedIn=Display;System
+# Styli intentionally omitted, following the official libwacom Chromebook
+# entries (see data/hp-elite-chromebook-c1030.tablet, FIXME libwacom #639).
+# The Pixelbook Pen already has its own stylus DB entry (0x56a:0x8051,
+# "Google Pixelbook Pen", Buttons=0), outside the isdv4-aes group.
+
+[Features]
+Stylus=true
+Touch=true
