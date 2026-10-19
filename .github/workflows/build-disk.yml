@@ -35,10 +35,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # qcow2 disk image, built with bootc-image-builder (any architecture)
+  # qcow2 disk image, built with bootc-image-builder (any architecture).
+  # The platform input only exists for workflow_dispatch; on pull_request it
+  # is empty, so default to amd64 — the published image is single-arch amd64
+  # and bootc-image-builder cannot run it on an arm64 runner.
   build-qcow2:
     name: Build qcow2
-    runs-on: ${{ inputs.platform == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    runs-on: ${{ (inputs.platform || 'amd64') == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     permissions:
       contents: read
       packages: read
