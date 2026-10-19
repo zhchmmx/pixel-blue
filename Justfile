@@ -8,6 +8,7 @@ export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export bib_image := env_var("BIB_IMAGE")
+export jasonn3_image := env_var("JASONN3_IMAGE")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -50,6 +51,7 @@ clean:
     rm -f changelog.md
     rm -f output.env
     rm -rf output/
+    rm -rf build/
 
 # Sudo Clean Repo
 [group('Utility')]
@@ -344,9 +346,51 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build an ISO virtual machine image
+# Build an installable anaconda ISO with jasonn3/build-container-installer
+#
+# Unlike the BIB-based disk images, this ISO:
+#   - installs the container image from an OCI repo embedded in the ISO (offline)
+#   - preinstalls the Flatpak apps listed in flatpak_refs/ (pulled from Flathub
+#     at build time, deployed to /var/lib/flatpak at install time)
+#   - re-points the installation at the registry (bootc switch) after install
+#   - uses Anaconda's fedora-silverblue profile (VARIANT=Silverblue): the
+#     installer only asks for the destination, and account/timezone setup
+#     happens in gnome-initial-setup on first boot, like the official Fedora ISO
+#
+# Keep the jasonn3 image tag in sync with the SHA pinned for
+# jasonn3/build-container-installer in .github/workflows/build-disk.yml.
+#
+# Example: just build-iso
 [group('Build Virtal Machine Image')]
-build-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "iso" "disk_config/iso.toml")
+build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="44": (_rootful_load_image target_image tag)
+    #!/usr/bin/env bash
+    set -euox pipefail
+    # jasonn3 wants the bare image name; strip the localhost/ prefix
+    image_name="{{ target_image }}"
+    image_name="${image_name#localhost/}"
+    mkdir -p build
+    sudo podman run \
+      --rm \
+      --pull=newer \
+      --privileged \
+      --volume "$(pwd)":/github/workspace \
+      --volume /var/lib/containers/storage:/var/lib/containers/storage \
+      --security-opt label=type:unconfined_t \
+      "{{ jasonn3_image }}" \
+      IMAGE_NAME="${image_name}" \
+      IMAGE_REPO="ghcr.io/{{ repo_organization }}" \
+      IMAGE_SRC="containers-storage:{{ target_image }}:{{ tag }}" \
+      IMAGE_TAG="{{ tag }}" \
+      VERSION="{{ version }}" \
+      VARIANT="Silverblue" \
+      FLATPAK_REMOTE_NAME="flathub" \
+      FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
+      FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \
+      ISO_NAME=/github/workspace/build/pixel-blue.iso
+
+# Rebuild the anaconda ISO (rebuilds the container image first)
+[group('Build Virtal Machine Image')]
+rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="44": (build target_image tag) && (build-iso target_image tag version)
 
 # Rebuild a QCOW2 virtual machine image
 [group('Build Virtal Machine Image')]
@@ -356,19 +400,15 @@ rebuild-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_r
 [group('Build Virtal Machine Image')]
 rebuild-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_rebuild-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Rebuild an ISO virtual machine image
-[group('Build Virtal Machine Image')]
-rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_rebuild-bib target_image tag "iso" "disk_config/iso.toml")
-
-# Run a virtual machine with the specified image type and configuration
-_run-vm $target_image $tag $type $config:
+# Run a virtual machine with the specified image type
+_run-vm $target_image $tag $type:
     #!/usr/bin/env bash
     set -eoux pipefail
 
     # Determine the image file based on the type
     image_file="output/${type}/disk.${type}"
     if [[ $type == iso ]]; then
-        image_file="output/bootiso/install.iso"
+        image_file="build/pixel-blue.iso"
     fi
 
     # Build the image if it does not exist
@@ -404,15 +444,15 @@ _run-vm $target_image $tag $type $config:
 
 # Run a virtual machine from a QCOW2 image
 [group('Run Virtal Machine')]
-run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "qcow2" "disk_config/disk.toml")
+run-vm-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "qcow2")
 
 # Run a virtual machine from a RAW image
 [group('Run Virtal Machine')]
-run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "raw" "disk_config/disk.toml")
+run-vm-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "raw")
 
 # Run a virtual machine from an ISO
 [group('Run Virtal Machine')]
-run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso" "disk_config/iso.toml")
+run-vm-iso $target_image=("localhost/" + image_name) $tag=default_tag: && (_run-vm target_image tag "iso")
 
 # Run a virtual machine using systemd-vmspawn
 [group('Run Virtal Machine')]
