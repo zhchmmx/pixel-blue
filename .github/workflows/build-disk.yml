@@ -9,13 +9,6 @@ on:
         required: false
         default: false
         type: boolean
-      platform:
-        description: "Architecture for the qcow2 build (the anaconda ISO is amd64 only)"
-        required: true
-        type: choice
-        options:
-          - amd64
-          - arm64
   pull_request:
     branches:
       - main
@@ -35,13 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # qcow2 disk image, built with bootc-image-builder (any architecture).
-  # The platform input only exists for workflow_dispatch; on pull_request it
-  # is empty, so default to amd64 — the published image is single-arch amd64
-  # and bootc-image-builder cannot run it on an arm64 runner.
+  # qcow2 disk image, built with bootc-image-builder (amd64)
   build-qcow2:
     name: Build qcow2
-    runs-on: ${{ (inputs.platform || 'amd64') == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: read
@@ -58,16 +48,7 @@ jobs:
           echo "USER_UID=${USER_UID}" >> ${GITHUB_ENV}
           echo "USER_GID=${USER_GID}" >> ${GITHUB_ENV}
 
-      - name: Install dependencies
-        if: inputs.platform == 'arm64'
-        run: |
-          set -x
-          sudo apt update -y
-          sudo apt install -y \
-            podman
-
       - name: Maximize build space
-        if: inputs.platform != 'arm64'
         uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
         with:
           remove-codeql: true
@@ -114,7 +95,6 @@ jobs:
           rclone copy $SOURCE_DIR S3:${{ secrets.S3_BUCKET_NAME }}
 
   # Anaconda install ISO, built with jasonn3/build-container-installer.
-  # amd64 only: the action's container image is not published for arm64.
   # The ISO installs the container image from an embedded OCI repo (offline),
   # deploys the Flatpak apps from flatpak_refs/ to /var/lib/flatpak, and
   # re-points the installation at the registry (bootc switch) afterwards.

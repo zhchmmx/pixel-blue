@@ -357,7 +357,6 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 #     installer only asks for the destination, and account/timezone setup
 #     happens in gnome-initial-setup on first boot, like the official Fedora ISO
 #
-# amd64 only (the action's container image is not published for arm64).
 # Keep the jasonn3 image tag in sync with the SHA pinned for
 # jasonn3/build-container-installer in .github/workflows/build-disk.yml.
 #
