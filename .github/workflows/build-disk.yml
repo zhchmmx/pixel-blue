@@ -78,6 +78,13 @@ jobs:
           compression-level: 0
           overwrite: true
 
+
+      - name: Synchronize system clock
+        if: inputs.upload-to-s3 == true && github.event_name != 'pull_request'
+        run: |
+          sudo timedatectl set-ntp true
+          sleep 5
+
       - name: Upload to S3
         if: inputs.upload-to-s3 == true && github.event_name != 'pull_request'
         shell: bash
