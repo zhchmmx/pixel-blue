@@ -162,11 +162,12 @@ jobs:
             MANIFEST=$(curl -sf -H "${AUTH}" -H "${ACCEPT}" "https://ghcr.io/v2/${REPO}/manifests/${DIGEST}")
           fi
           CONFIG_DIGEST=$(echo "${MANIFEST}" | jq -r .config.digest)
-          FEDORA_VERSION=$(curl -sf -H "${AUTH}" "https://ghcr.io/v2/${REPO}/blobs/${CONFIG_DIGEST}" \
-            | jq -r '.config.Labels["org.opencontainers.image.version"]' | cut -d. -f1)
-          if [ -z "${FEDORA_VERSION}" ]; then
-            echo "::error::Could not resolve Fedora version from the image label"
-            exit 1
+          VERSION_LABEL=$(curl -sf -H "${AUTH}" "https://ghcr.io/v2/${REPO}/blobs/${CONFIG_DIGEST}" \
+            | jq -r '.config.Labels["org.opencontainers.image.version"]')
+          FEDORA_VERSION=$(printf '%s' "${VERSION_LABEL}" | cut -d. -f1)
+          if [ -z "${FEDORA_VERSION}" ] || [ "${FEDORA_VERSION}" = "null" ]; then
+            FEDORA_VERSION="44"
+            echo "::warning::Image label org.opencontainers.image.version is missing; falling back to Fedora ${FEDORA_VERSION}"
           fi
           echo "FEDORA_VERSION=${FEDORA_VERSION}" >> "${GITHUB_ENV}"
           echo "Installer Fedora version: ${FEDORA_VERSION}"
