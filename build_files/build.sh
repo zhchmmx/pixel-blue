@@ -177,5 +177,18 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
+### GNOME Shell default dash favorites
+#
+# Pin the default apps shown on the GNOME Shell dash. The list is provided as a
+# gschema override in system_files/usr/share/glib-2.0/schemas/, which the
+# "cp -avf /ctx/system_files/. /" at the top of this script places in
+# /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to
+# take effect, so do it after all package operations.
+#
+# Note: this only changes the default for users who never customized their own
+# favorites; it does not override a user's existing dconf value.
+
+glib-compile-schemas /usr/share/glib-2.0/schemas
+
 # Clean up dnf cache to reduce image size
 dnf5 clean all
