@@ -1,0 +1,20 @@
+{
+  "default": [
+    {
+      "type": "insecureAcceptAnything"
+    }
+  ],
+  "transports": {
+    "docker": {
+      "ghcr.io/zhchmmx/pixel-blue": [
+        {
+          "type": "sigstoreSigned",
+          "keyPath": "/etc/pki/containers/pixel-blue.pub",
+          "signedIdentity": {
+            "type": "matchExact"
+          }
+        }
+      ]
+    }
+  }
+}
