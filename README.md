@@ -25,7 +25,7 @@ Pixel Blue is published in three channels. Pick the one you want and use the mat
 `latest` follows the upstream Universal Blue `latest` image and always tracks the newest Fedora.
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolicy
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest
 ```
 
 ### Testing channel
@@ -33,23 +33,16 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest --enforce-container-sigpolic
 `testing` is the preview channel for `latest`. It is built from the same upstream `latest` base, so it only differs by the changes that are being validated before they land in `latest`. Use it if you want to test upcoming changes early.
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing
 ```
 
-### Testing channel (preview of stable)
-
-`testing` builds on the same Fedora GA release as `stable` and receives changes first, so it previews what `stable` will get next. It can be less stable than `stable`; use it if you want to try upcoming changes early.
-
-``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing --enforce-container-sigpolicy
-```
 
 ### Pinning to a specific build
 
 Every build is also published with a commit-based tag, so you can freeze to an exact build:
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit> --enforce-container-sigpolicy
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit>
 ```
 
 After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
@@ -76,39 +69,6 @@ S3 is selected at the firmware level, which cannot be baked into the image:
 Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
-
-## Verifying S3 is actually used
-
-```bash
-# Active selection is shown in square brackets, e.g. "[deep] s2idle":
-cat /sys/power/mem_sleep
-
-# After a suspend cycle, confirm the kernel took the S3 path:
-journalctl -b | grep -i "suspend entry"    # expect "(deep)"
-
-# Counters: success increments per cycle, failed should stay 0:
-cat /sys/power/suspend_stats/success
-cat /sys/power/suspend_stats/failed_suspend
-```
-
-The practical check: close the lid for an hour or two. S3 should drain very
-little (typically under ~1%/hour) and resume back to the login screen in a couple
-of seconds. If it wakes by rebooting instead, see the CR50 note below.
-
-## CR50 TPM (resume) note
-
-On eve, resume from suspend depends on the `tpm_tis_i2c_cr50` driver being
-loaded. This image inherits the Fedora base kernel, which ships that support, and
-it has been verified working on the Pixelbook — so no action is needed for normal
-use. If a future kernel ever makes resume fail (sleeps fine but wakes to a
-reboot), that module is the first thing to check.
-
-## Optional fallback
-
-On the rare machine where disabling Modern Standby still leaves the selection on
-`s2idle`, you can force the deep path at boot with the kernel argument
-`mem_sleep_default=deep` (via `rpm-ostree kargs`, or a
-`/usr/lib/bootc/kargs.d` entry). This is intentionally not set in the image.
 
 # Learn More
 
