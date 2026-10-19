@@ -1,0 +1,2 @@
+# Enable the ambient brightness watcher for all users by default
+enable ambient-watch.service

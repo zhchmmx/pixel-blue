@@ -18,6 +18,31 @@ dnf5 install -y git git-credential-oauth
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
 
+# Install wluma (Terra) for smooth ambient-light auto brightness.
+# GNOME's built-in auto-brightness reacts too fast to ALS changes and jumps
+# between brightness levels; wluma learns manual preferences and transitions
+# smoothly. It is driven by the GNOME "Automatic Brightness" toggle through
+# ambient-watch.service (shipped in system_files/usr/lib/systemd/user/).
+dnf5 install -y wluma
+
+# Ensure a working wluma user unit exists (written after the dnf install so
+# it wins over any unit shipped by the package).
+mkdir -p /usr/lib/systemd/user
+cat > /usr/lib/systemd/user/wluma.service << 'EOF'
+[Unit]
+Description=wluma automatic brightness daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wluma
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
 ### Flatpak repositories
 #
 # Upstream (fedora-silverblue) ships flatpak-add-fedora-repos.service, enabled
