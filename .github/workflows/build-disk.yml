@@ -150,22 +150,15 @@ jobs:
         run: |
           set -euo pipefail
           # jasonn3 needs the Fedora version of the installer environment.
-          # Read it from the image label (e.g. "44.20261018.0" -> "44") so it
-          # tracks the base image instead of being pinned by hand.
-          REPO="${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}"
-          TOKEN=$(curl -sf "https://ghcr.io/token?scope=repository:${REPO}:pull&service=ghcr.io" | jq -r .token)
-          AUTH="Authorization: Bearer ${TOKEN}"
-          ACCEPT="Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json"
-          MANIFEST=$(curl -sf -H "${AUTH}" -H "${ACCEPT}" "https://ghcr.io/v2/${REPO}/manifests/${DEFAULT_TAG}")
-          DIGEST=$(echo "${MANIFEST}" | jq -r 'if .manifests then (.manifests[] | select(.platform.architecture=="amd64") | .digest) else empty end')
-          if [ -n "${DIGEST}" ]; then
-            MANIFEST=$(curl -sf -H "${AUTH}" -H "${ACCEPT}" "https://ghcr.io/v2/${REPO}/manifests/${DIGEST}")
-          fi
-          CONFIG_DIGEST=$(echo "${MANIFEST}" | jq -r .config.digest)
-          FEDORA_VERSION=$(curl -sf -H "${AUTH}" "https://ghcr.io/v2/${REPO}/blobs/${CONFIG_DIGEST}" \
-            | jq -r '.config.Labels["org.opencontainers.image.version"]' | cut -d. -f1)
+          # Read it from the version label of the base image (e.g.
+          # "44.20261019.0" -> "44") so it tracks the base image instead of
+          # being pinned by hand. Skopeo picks up the labels our build's
+          # final rechunked image may have lost.
+          FEDORA_VERSION=$(skopeo inspect --override-arch amd64 \
+            docker://quay.io/fedora/fedora-silverblue:latest \
+            | jq -r '.Labels["org.opencontainers.image.version"]' | cut -d. -f1)
           if [ -z "${FEDORA_VERSION}" ]; then
-            echo "::error::Could not resolve Fedora version from the image label"
+            echo "::error::Could not resolve Fedora version from the base image label"
             exit 1
           fi
           echo "FEDORA_VERSION=${FEDORA_VERSION}" >> "${GITHUB_ENV}"
