@@ -1,0 +1,10 @@
+[Unit]
+Description=Ensure GNOME Wacom stylus keyfile exists
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/wacom-stylus-keyfile.sh
+
+[Install]
+WantedBy=default.target

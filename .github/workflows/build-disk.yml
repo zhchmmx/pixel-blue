@@ -78,21 +78,23 @@ jobs:
           compression-level: 0
           overwrite: true
 
+
       - name: Upload to S3
         if: inputs.upload-to-s3 == true && github.event_name != 'pull_request'
         shell: bash
         env:
           RCLONE_CONFIG_S3_TYPE: s3
-          RCLONE_CONFIG_S3_PROVIDER: ${{ secrets.S3_PROVIDER }}
+          # Credentials come from Secrets; the rest from Variables.
+          RCLONE_CONFIG_S3_PROVIDER: ${{ vars.S3_PROVIDER }}
           RCLONE_CONFIG_S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           RCLONE_CONFIG_S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_S3_REGION: ${{ secrets.S3_REGION }}
-          RCLONE_CONFIG_S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          RCLONE_CONFIG_S3_REGION: ${{ vars.S3_REGION }}
+          RCLONE_CONFIG_S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
           SOURCE_DIR: ${{ steps.build.outputs.output-directory }}
         run: |
           sudo apt-get update
           sudo apt-get install -y rclone
-          rclone copy $SOURCE_DIR S3:${{ secrets.S3_BUCKET_NAME }}
+          rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
   # Anaconda install ISO, built with jasonn3/build-container-installer.
   # The ISO installs the container image from an embedded OCI repo (offline),
@@ -179,13 +181,14 @@ jobs:
         shell: bash
         env:
           RCLONE_CONFIG_S3_TYPE: s3
-          RCLONE_CONFIG_S3_PROVIDER: ${{ secrets.S3_PROVIDER }}
+          # Credentials come from Secrets; the rest from Variables.
+          RCLONE_CONFIG_S3_PROVIDER: ${{ vars.S3_PROVIDER }}
           RCLONE_CONFIG_S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           RCLONE_CONFIG_S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_S3_REGION: ${{ secrets.S3_REGION }}
-          RCLONE_CONFIG_S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          RCLONE_CONFIG_S3_REGION: ${{ vars.S3_REGION }}
+          RCLONE_CONFIG_S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
           SOURCE_DIR: ${{ steps.build.outputs.iso_path }}
         run: |
           sudo apt-get update
           sudo apt-get install -y rclone
-          rclone copy $SOURCE_DIR S3:${{ secrets.S3_BUCKET_NAME }}
+          rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
