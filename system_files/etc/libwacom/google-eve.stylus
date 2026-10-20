@@ -4,8 +4,8 @@
 # google-eve.tablet (Styli=0x4fca) so GNOME's serial-less pen path shows
 # a named pen with button settings instead of the generic AES Pen.
 [0x56a:0x4fca]
-Name=Pixelbook Pen
+Name=Google Pixelbook Pen
 Group=isdv4-aes
-Buttons=2
+Buttons=1
 Axes=Tilt;Pressure;Distance;
 Type=Mobile
