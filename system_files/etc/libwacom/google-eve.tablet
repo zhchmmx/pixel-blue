@@ -7,13 +7,9 @@ Name=Google Pixelbook Pen
 ModelName=Pixelbook
 DeviceMatch=i2c|2d1f|5143
 Class=ISDV4
-Width=260
-Height=173
+Width=259
+Height=172
 IntegratedIn=Display;System
-# Styli intentionally omitted, following the official libwacom Chromebook
-# entries (see data/hp-elite-chromebook-c1030.tablet, FIXME libwacom #639).
-# The Pixelbook Pen already has its own stylus DB entry (0x56a:0x8051,
-# "Google Pixelbook Pen", Buttons=0), outside the isdv4-aes group.
 
 [Features]
 Stylus=true
