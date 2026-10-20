@@ -1,0 +1,11 @@
+# Google Pixelbook (eve) AES stylus
+# The 2d1f:5143 digitizer reports a dynamic hardware id per session, so
+# libwacom lookups by raw id fail. This entry is bound via
+# google-eve.tablet (Styli=0x4fca) so GNOME's serial-less pen path shows
+# a named pen with button settings instead of the generic AES Pen.
+[0x56a:0x4fca]
+Name=Google Pixelbook Pen
+Group=isdv4-aes
+Buttons=1
+Axes=Tilt;Pressure;
+Type=Mobile
