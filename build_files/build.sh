@@ -53,12 +53,17 @@ dnf5 install -y \
 # libva-intel-media-driver build (a mandatory @multimedia package in the base
 # image) has the patented codecs stripped, so swap it for the complete one
 # from RPM Fusion nonfree (fedy and other distro tools use the same swap).
-# libva-utils ships vainfo for verification. mesa-va-drivers-freeworld is the
-# RPM Fusion rebuild of Mesa's VA-API driver with the full set of codecs
-# (notably HEVC/H.265) enabled, so swap it in for complete hardware decode.
+# libva-utils ships vainfo for verification.
+#
+# Note: we deliberately do NOT swap mesa-va-drivers for the RPM Fusion
+# -freeworld build. Intel GPUs do not use Mesa for video acceleration (Mesa VA
+# drivers only serve AMD/nouveau); the freeworld mesa swap is what gives AMD
+# cards H.264/H.265 decode. On this Intel Pixelbook it provides no benefit, and
+# it is fragile (its mesa version frequently lags Fedora's updates, breaking the
+# mesa-dri-drivers/libgallium version pins) plus it is a documented cause of
+# GNOME login-screen crashes. iHD above already handles all Intel HW decode.
 dnf5 swap -y libva-intel-media-driver intel-media-driver --enablerepo=rpmfusion-nonfree
 dnf5 install -y libva-utils
-dnf5 swap -y mesa-va-drivers mesa-va-drivers-freeworld --enablerepo=rpmfusion-free
 
 ### Waydroid (Android in a container)
 #
