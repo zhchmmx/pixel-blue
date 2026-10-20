@@ -30,11 +30,14 @@ dnf5 install -y keyd
 ### Multimedia codecs and hardware video acceleration
 #
 # Full ffmpeg replaces the stripped-down ffmpeg-free shipped by Fedora; the
-# swap is the method recommended by RPM Fusion. The gstreamer1-plugins-*
-# packages provide H.264/H.265 and other restricted codecs to GTK/GStreamer
-# based apps, including the GNOME video decoders. gstreamer1-vaapi wires
-# those decoders into VA-API.
-dnf5 swap -y ffmpeg-free ffmpeg --enablerepo=rpmfusion-free
+# swap is the method recommended by RPM Fusion. --allowerasing is required:
+# ffmpeg-free pulls in the *-free library subpackages (libswscale-free,
+# libavcodec-free, ...) which file-conflict with the complete ffmpeg-libs, and
+# swap alone will not remove them. The gstreamer1-plugins-* packages provide
+# H.264/H.265 and other restricted codecs to GTK/GStreamer based apps,
+# including the GNOME video decoders. gstreamer1-vaapi wires those decoders
+# into VA-API.
+dnf5 swap -y ffmpeg-free ffmpeg --allowerasing --enablerepo=rpmfusion-free
 dnf5 install -y \
   gstreamer1-plugins-good \
   gstreamer1-plugins-bad-free \
