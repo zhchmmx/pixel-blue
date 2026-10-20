@@ -44,19 +44,17 @@ dnf5 install -y \
   gstreamer1-plugin-libav \
   gstreamer1-vaapi
 
-# Intel VA-API user-space drivers for the Pixelbook (eve) Kaby Lake iGPU.
+# Intel VA-API user-space driver for the Pixelbook (eve) Kaby Lake iGPU.
 # intel-media-driver (iHD) is the actively maintained driver and provides the
 # full decode/encode set: H.264, HEVC 8/10-bit and VP9 8/10-bit. Fedora's
-# libva-intel-media-driver build has the patented codecs stripped, so take the
-# complete one from RPM Fusion nonfree (fedy and other distro tools use the
-# same swap). libva-intel-driver (the legacy i965 driver, retired from Fedora
-# 43+) is kept as a fallback: on Gen9.5 iHD can occasionally misbehave in
-# some players, and vainfo can be pointed at it via LIBVA_DRIVER_NAME=i965.
+# libva-intel-media-driver build (a mandatory @multimedia package in the base
+# image) has the patented codecs stripped, so swap it for the complete one
+# from RPM Fusion nonfree (fedy and other distro tools use the same swap).
 # libva-utils ships vainfo for verification. mesa-va-drivers-freeworld is the
 # RPM Fusion rebuild of Mesa's VA-API driver with the full set of codecs
 # (notably HEVC/H.265) enabled, so swap it in for complete hardware decode.
 dnf5 swap -y libva-intel-media-driver intel-media-driver --enablerepo=rpmfusion-nonfree
-dnf5 install -y libva-intel-driver libva-utils
+dnf5 install -y libva-utils
 dnf5 swap -y mesa-va-drivers mesa-va-drivers-freeworld --enablerepo=rpmfusion-free
 
 ### Waydroid (Android in a container)
