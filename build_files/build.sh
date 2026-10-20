@@ -9,15 +9,18 @@ cp -avf "/ctx/system_files"/. /
 
 # Packages can be installed from any enabled yum repo on the image.
 # This image builds from the vanilla fedora-silverblue base (not a ublue main
-# image), so RPM Fusion repos are NOT pre-enabled; add the free repo below.
+# image), so RPM Fusion repos are NOT pre-enabled; add them below.
 
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
 
-# Add RPM Fusion free repo (no nonfree repo is needed for anything below).
-# The release package is not in the Fedora repos, so install it from the
-# official RPM Fusion URL, as documented on rpmfusion.org.
-dnf5 install -y "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
+# Add RPM Fusion repos (free for ffmpeg/codecs/mesa-freeworld, nonfree for
+# the full intel-media-driver). The release packages are not in the Fedora
+# repos, so install them from the official RPM Fusion URLs, as documented on
+# rpmfusion.org.
+dnf5 install -y \
+  "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
+  "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm"
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
@@ -41,12 +44,18 @@ dnf5 install -y \
   gstreamer1-plugin-libav \
   gstreamer1-vaapi
 
-# Intel VA-API user-space driver. The Pixelbook (eve) is Kaby Lake, which is
-# still served by the legacy i965 driver. libva-intel-driver (retired from
-# Fedora 43+, now shipped by RPM Fusion free) provides it, and libva-utils
-# ships vainfo for verification. mesa-va-drivers-freeworld is the
+# Intel VA-API user-space drivers for the Pixelbook (eve) Kaby Lake iGPU.
+# intel-media-driver (iHD) is the actively maintained driver and provides the
+# full decode/encode set: H.264, HEVC 8/10-bit and VP9 8/10-bit. Fedora's
+# libva-intel-media-driver build has the patented codecs stripped, so take the
+# complete one from RPM Fusion nonfree (fedy and other distro tools use the
+# same swap). libva-intel-driver (the legacy i965 driver, retired from Fedora
+# 43+) is kept as a fallback: on Gen9.5 iHD can occasionally misbehave in
+# some players, and vainfo can be pointed at it via LIBVA_DRIVER_NAME=i965.
+# libva-utils ships vainfo for verification. mesa-va-drivers-freeworld is the
 # RPM Fusion rebuild of Mesa's VA-API driver with the full set of codecs
 # (notably HEVC/H.265) enabled, so swap it in for complete hardware decode.
+dnf5 swap -y libva-intel-media-driver intel-media-driver --enablerepo=rpmfusion-nonfree
 dnf5 install -y libva-intel-driver libva-utils
 dnf5 swap -y mesa-va-drivers mesa-va-drivers-freeworld --enablerepo=rpmfusion-free
 

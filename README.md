@@ -72,7 +72,7 @@ expect higher lid-close power draw.
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
-- Add RPM Fusion (free only) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware decoding (Intel `i965` driver via `libva-intel-driver`, plus `mesa-va-drivers-freeworld`). AAC and HEVC/H.265 decode is accelerated on the Pixelbook's Kaby Lake iGPU; check it with `vainfo`.
+- Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware decoding. AAC and HEVC (8/10-bit) decode is accelerated on the Pixelbook's Kaby Lake iGPU via `intel-media-driver` (iHD, swapped in from RPM Fusion nonfree, with the legacy `i965` driver kept as fallback); check it with `vainfo`.
 - Improve Pixelbook Pen support.
 - Improve auto brightness via [wluma](https://github.com/max-baz/wluma). (In progress)
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
