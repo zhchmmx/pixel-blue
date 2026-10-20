@@ -72,8 +72,26 @@ expect higher lid-close power draw.
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
+- Add RPM Fusion (free only) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware decoding (Intel `i965` driver via `libva-intel-driver`, plus `mesa-va-drivers-freeworld`). AAC and HEVC/H.265 decode is accelerated on the Pixelbook's Kaby Lake iGPU; check it with `vainfo`.
 - Improve Pixelbook Pen support.
 - Improve auto brightness via [wluma](https://github.com/max-baz/wluma). (In progress)
+- Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
+
+# Waydroid First-Time Setup
+
+The Waydroid packages are baked into the image, but the Android system image is not pre-downloaded. On first use, run:
+
+``` bash
+sudo waydroid init
+```
+
+This downloads the LineageOS-based Android system image (choose the variant you want when prompted). Afterwards start the container and launch it:
+
+``` bash
+sudo systemctl start waydroid-container
+waydroid session start
+waydroid show-full-ui
+```
 
 # Learn More
 

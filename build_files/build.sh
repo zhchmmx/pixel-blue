@@ -8,15 +8,51 @@ cp -avf "/ctx/system_files"/. /
 ### Install packages
 
 # Packages can be installed from any enabled yum repo on the image.
-# RPMfusion repos are available by default in ublue main images
+# This image builds from the vanilla fedora-silverblue base (not a ublue main
+# image), so RPM Fusion repos are NOT pre-enabled; add the free repo below.
 
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
+
+# Add RPM Fusion free repo (no nonfree repo is needed for anything below)
+dnf5 install -y rpmfusion-free-release
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
+
+### Multimedia codecs and hardware video acceleration
+#
+# Full ffmpeg replaces the stripped-down ffmpeg-free shipped by Fedora; the
+# swap is the method recommended by RPM Fusion. The gstreamer1-plugins-*
+# packages provide H.264/H.265 and other restricted codecs to GTK/GStreamer
+# based apps, including the GNOME video decoders. gstreamer1-vaapi wires
+# those decoders into VA-API.
+dnf5 swap -y ffmpeg-free ffmpeg --enablerepo=rpmfusion-free
+dnf5 install -y \
+  gstreamer1-plugins-good \
+  gstreamer1-plugins-bad-free \
+  gstreamer1-plugins-bad-freeworld \
+  gstreamer1-plugins-ugly-free \
+  gstreamer1-plugins-ugly \
+  gstreamer1-libav \
+  gstreamer1-vaapi
+
+# Intel VA-API user-space driver. The Pixelbook (eve) is Kaby Lake, which is
+# still served by the legacy i965 driver; libva-intel-driver provides it, and
+# libva-utils ships vainfo for verification. mesa-va-drivers-freeworld is the
+# RPM Fusion rebuild of Mesa's VA-API driver with the full set of codecs
+# (notably HEVC/H.265) enabled, so swap it in for complete hardware decode.
+dnf5 install -y libva-intel-driver libva-utils
+dnf5 swap -y mesa-va-drivers mesa-va-drivers-freeworld --enablerepo=rpmfusion-free
+
+### Waydroid (Android in a container)
+#
+# waydroid and waydroid-selinux are in the Fedora repos. System images are not
+# pre-downloaded; on first boot run `sudo waydroid init` to fetch them (an
+# OTA-style download of the LineageOS-based Android image).
+dnf5 install -y waydroid waydroid-selinux
 
 ### Flatpak repositories
 #
