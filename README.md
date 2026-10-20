@@ -10,11 +10,9 @@ Please note that this is just an experimental project; use it at your own risk.
 
 There are several ways for Pixelbook users to install this image on their device or just switch from another Universal Blue-based OS.
 
-## Option 1: Install Pixel Blue (Not ready yet.)
+## Option 1: Install Pixel Blue from ISO file (Not ready yet.)
 
-For Chinese users, please use [this link](https://example.com) for faster downloads.
 
-For users from other countries and regions, please check our GitHub Release page.
 
 ## Option 2: Switch to Pixel Blue
 
@@ -69,6 +67,13 @@ S3 is selected at the firmware level, which cannot be baked into the image:
 Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
+
+# Modifications to the Upstream
+
+- Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
+- Add keymap via [keyd](https://github.com/rvaiya/keyd).
+- Improve Pixelbook Pen support.
+- Improve auto brightness via [wluma](https://github.com/max-baz/wluma). (In progress)
 
 # Learn More
 
