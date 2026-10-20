@@ -7,8 +7,8 @@ Name=Google Pixelbook
 ModelName=Pixelbook
 DeviceMatch=i2c|2d1f|5143
 Class=ISDV4
-Width=259
-Height=172
+Width=260
+Height=173
 IntegratedIn=Display;System
 # Bind the Pixelbook Pen stylus (see google-eve.stylus). GNOME's Wacom
 # panel picks the first supported stylus for serial-less pens, so this
