@@ -1,2 +1,0 @@
-enable wacom-stylus-keyfile.service
-enable wacom-stylus-keyfile.timer

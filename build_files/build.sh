@@ -179,6 +179,7 @@ systemctl enable podman.socket
 
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
+systemctl --global enable wacom-stylus-keyfile.service
 
 
 # Clean up dnf cache to reduce image size
