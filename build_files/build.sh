@@ -14,8 +14,10 @@ cp -avf "/ctx/system_files"/. /
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
 
-# Add RPM Fusion free repo (no nonfree repo is needed for anything below)
-dnf5 install -y rpmfusion-free-release
+# Add RPM Fusion free repo (no nonfree repo is needed for anything below).
+# The release package is not in the Fedora repos, so install it from the
+# official RPM Fusion URL, as documented on rpmfusion.org.
+dnf5 install -y "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
@@ -36,12 +38,13 @@ dnf5 install -y \
   gstreamer1-plugins-bad-freeworld \
   gstreamer1-plugins-ugly-free \
   gstreamer1-plugins-ugly \
-  gstreamer1-libav \
+  gstreamer1-plugin-libav \
   gstreamer1-vaapi
 
 # Intel VA-API user-space driver. The Pixelbook (eve) is Kaby Lake, which is
-# still served by the legacy i965 driver; libva-intel-driver provides it, and
-# libva-utils ships vainfo for verification. mesa-va-drivers-freeworld is the
+# still served by the legacy i965 driver. libva-intel-driver (retired from
+# Fedora 43+, now shipped by RPM Fusion free) provides it, and libva-utils
+# ships vainfo for verification. mesa-va-drivers-freeworld is the
 # RPM Fusion rebuild of Mesa's VA-API driver with the full set of codecs
 # (notably HEVC/H.265) enabled, so swap it in for complete hardware decode.
 dnf5 install -y libva-intel-driver libva-utils
