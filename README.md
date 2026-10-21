@@ -135,9 +135,13 @@ systemctl --user restart als-brightness.service
 
 ## Caveats
 
-- The udev rule hides the ALS from `iio-sensor-proxy` on purpose, otherwise
-  gnome-settings-daemon would compete for the backlight. The GNOME settings
-  toggle may therefore be hidden; `gsettings` still controls it.
+- The sensor is intentionally still published by `iio-sensor-proxy` so that
+  GNOME Settings keeps showing the **Automatic Brightness** switch. A D-Bus
+  policy (`/etc/dbus-1/system.d/50-pixel-blue-als.conf`) denies
+  `ClaimLight()` instead, which stops gnome-settings-daemon from reading the
+  sensor and competing for the backlight. Because polling in
+  `iio-sensor-proxy` only runs while a client holds a claim, gsd gets no light
+  updates and leaves brightness to the daemon.
 - Transitions are stepwise, like ChromeOS, not continuous.
 - The sensor lux scale may differ slightly from ChromeOS; adjust the thresholds
   in the override file if steps trigger at the wrong ambient light.

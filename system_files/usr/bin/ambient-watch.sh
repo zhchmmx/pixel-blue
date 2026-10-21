@@ -6,9 +6,10 @@
 #   toggle ON  -> start als-brightness.service (vendor ALS steps + curve)
 #   toggle OFF -> stop als-brightness.service  (manual brightness control)
 #
-# 99-hide-als.rules hides the ALS from iio-sensor-proxy so that
-# gnome-settings-daemon never competes with the daemon for the backlight.
-# This watcher is not enabled by default; see README.md for the opt-in command.
+# The ALS stays published by iio-sensor-proxy (so GNOME shows the toggle), and
+# /etc/dbus-1/system.d/50-pixel-blue-als.conf stops gnome-settings-daemon from
+# claiming it, so it never competes with the daemon for the backlight.
+# Enabled for all users by default; see README.md for the disable commands.
 
 set -u -o pipefail
 
