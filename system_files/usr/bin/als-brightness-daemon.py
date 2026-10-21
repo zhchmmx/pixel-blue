@@ -170,17 +170,61 @@ def select_step(steps: list, current: int, lux: float) -> int:
     return current
 
 
+def find_logind_session(bus, manager) -> str:
+    """Return the logind session that is allowed to write the backlight.
+
+    Services started by the per-user systemd manager live in user@UID.service,
+    which is not part of any logind session, so GetSessionByPID() on our own
+    PID fails with "PID ... does not belong to any known session". Fall back
+    to XDG_SESSION_ID and then to the active session of the same user.
+    """
+    session_id = os.environ.get("XDG_SESSION_ID", "").strip()
+    if session_id:
+        try:
+            return str(manager.GetSession(session_id))
+        except dbus.DBusException:
+            pass
+
+    try:
+        return str(manager.GetSessionByPID(dbus.UInt32(os.getpid())))
+    except dbus.DBusException:
+        pass
+
+    uid = os.getuid()
+    fallback = None
+    for _id, session_uid, _user, _seat, path in manager.ListSessions():
+        if int(session_uid) != uid:
+            continue
+        if fallback is None:
+            fallback = str(path)
+        props = dbus.Interface(
+            bus.get_object("org.freedesktop.login1", path),
+            "org.freedesktop.DBus.Properties",
+        )
+        try:
+            if bool(props.Get("org.freedesktop.login1.Session", "Active")):
+                return str(path)
+        except dbus.DBusException:
+            continue
+
+    if fallback is not None:
+        return fallback
+
+    raise RuntimeError("no logind session found for uid %d" % uid)
+
+
 class Backlight:
     """Write the panel brightness through systemd-logind."""
 
-    def __init__(self, device: str) -> None:
+    def __init__(self, device: str, max_level: int) -> None:
         self._device = device
+        self._max_level = max_level
         bus = dbus.SystemBus()
         manager = dbus.Interface(
             bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1"),
             "org.freedesktop.login1.Manager",
         )
-        session_path = manager.GetSessionByPID(dbus.UInt32(os.getpid()))
+        session_path = find_logind_session(bus, manager)
         self._session = dbus.Interface(
             bus.get_object("org.freedesktop.login1", session_path),
             "org.freedesktop.login1.Session",
@@ -188,14 +232,20 @@ class Backlight:
         self._last_error = 0.0
 
     def set_percent(self, percent: float) -> bool:
-        value = max(1, min(100, int(round(percent))))
+        # logind's SetBrightness() takes an absolute value in the
+        # 0..max_brightness range and writes it straight to sysfs, not a
+        # percentage.
+        value = int(round(percent * self._max_level / 100.0))
+        value = max(1, min(self._max_level, value))
         try:
             self._session.SetBrightness("backlight", self._device, dbus.UInt32(value))
         except dbus.DBusException as exc:
             now = time.monotonic()
             if now - self._last_error >= ERROR_LOG_INTERVAL:
                 self._last_error = now
-                LOG.error("SetBrightness(%d%%) failed: %s", value, exc)
+                LOG.error(
+                    "SetBrightness(%d of %d) failed: %s", value, self._max_level, exc
+                )
             return False
         return True
 
@@ -237,8 +287,8 @@ def main() -> int:
     )
 
     try:
-        backlight = Backlight(device)
-    except dbus.DBusException as exc:
+        backlight = Backlight(device, max_level)
+    except (dbus.DBusException, RuntimeError) as exc:
         LOG.error("cannot attach to the logind session: %s", exc)
         return 1
 
