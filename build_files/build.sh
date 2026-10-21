@@ -21,6 +21,9 @@ dnf5 install -y git git-credential-oauth
 dnf5 install -y \
   "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
   "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm"
+# D-Bus bindings used by the ALS auto-brightness daemon
+# (system_files/usr/bin/als-brightness-daemon.py writes through logind)
+dnf5 install -y python3-dbus
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
@@ -234,6 +237,11 @@ systemctl enable podman.socket
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
+
+# Watch the GNOME "Automatic Brightness" toggle and start/stop the ALS daemon
+# with it. ambient-enabled defaults to true, so auto brightness is on by
+# default; turning the toggle off stops the daemon.
+systemctl --global enable ambient-watch.service
 
 
 # Clean up dnf cache to reduce image size
