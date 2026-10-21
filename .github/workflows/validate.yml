@@ -181,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t files < "$RUNNER_TEMP/py_files.txt"
-          ruff --isolated --no-cache check \
+          ruff --isolated check --no-cache \
             --target-version py310 --line-length 120 \
             --select E,W,F,I "${files[@]}"
 
@@ -191,7 +191,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t files < "$RUNNER_TEMP/py_files.txt"
-          ruff --isolated --no-cache format --check --diff \
+          ruff --isolated format --check --diff \
             --line-length 120 "${files[@]}" || {
             echo "::warning::ruff format reports formatting differences (advisory, run 'ruff format --line-length 120 <file>' locally)"
             exit 1
