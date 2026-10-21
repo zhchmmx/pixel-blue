@@ -74,7 +74,9 @@ expect higher lid-close power draw.
 The Pixelbook keyboard has no Home/End, Page Up/Down, forward Delete, Caps Lock
 or dedicated F1–F12 keys. The image uses [keyd](https://github.com/rvaiya/keyd)
 so these are reached with the **Search** and **Alt** keys, exactly the way
-ChromeOS does it. The combos follow the official Google shortcut list, and the
+ChromeOS does it — with one deliberate exception: the page keys (`Alt+↑/↓`)
+are left unmapped so apps keep them (see **Alt held**). The combos follow
+the official Google shortcut list, and the
 keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
 (verified against upstream `gsettings-desktop-schemas`). The config lives in
 `system_files/etc/keyd/cros.conf` (plus `system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`
@@ -117,7 +119,6 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 
 | Combo | Emits | Function |
 | --- | --- | --- |
-| `Alt` + `↑` / `↓` | `Page Up` / `Page Down` | the official 6-pack page keys (see caveats) |
 | `Alt` + `Backspace` | `Delete` | forward delete |
 | `Alt` + `Search` | `Caps Lock` | Caps Lock |
 | `Alt` + `Brightness −` / `+` | keyboard backlight | native pass-through |
@@ -125,6 +126,10 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 `Ctrl+Alt+↑/↓` and `Ctrl+Alt+←/→` are **not** remapped — GNOME binds them to workspace
 switching, and the owner chose to keep that. Bare `Alt+←/→` is likewise left untouched
 (apps use it for back/forward), since ChromeOS does not use it for text navigation.
+The official ChromeOS page keys, `Alt+↑/↓`, are deliberately **not** mapped either:
+keyd sits below the app layer, so binding them globally would cost GNOME Files its
+parent-folder shortcut (`Alt+↑`) and editors their move-line bindings (`Alt+↑/↓`) —
+the owner chose to keep those app shortcuts instead.
 
 ## Function keys & the Assistant key
 
@@ -136,12 +141,6 @@ switching, and the owner chose to keep that. Bare `Alt+←/→` is likewise left
 
 ## Caveats & not-mapped items
 
-- **`Alt+↑/↓`**: GNOME has *no* system-level binding for these (schema-verified), but
-  some **applications** do — most notably GNOME Files uses `Alt+↑` to jump to the
-  parent folder (and `Alt+↓` to a child / history entry), and many text editors bind
-  `Alt+↑/↓` to move the current line. Because keyd works below the app layer, this
-  mapping hijacks them system-wide and Files' parent-folder shortcut is lost. To revert,
-  delete the two `up = pageup` / `down = pagedown` lines in the `[alt]` section.
 - **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
   opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
   straight to the screenshot UI and does not keep the original key.
