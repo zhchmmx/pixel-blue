@@ -68,88 +68,13 @@ Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
 
-# Experimental automatic brightness
-
-The image ships an experimental ambient-light auto-brightness daemon built
-around the Pixelbook (eve) vendor curve taken from ChromeOS `power_manager`. It
-is enabled by default and follows GNOME's automatic brightness toggle; while it
-is active, GNOME's own auto-brightness is kept out of the way.
-
-## What it does
-
-- seven brightness steps with the vendor down/up lux thresholds (hysteresis),
-  so brightness does not flap around a single lux value
-- exponential smoothing of the sensor readings
-- the ChromeOS non-linear percent-to-backlight curve
-- a short ramp between steps instead of an instant jump
-- if you change the brightness yourself, the daemon yields; it takes control
-  back once the ambient light changes by more than 100 lux
-
-## Enabled by default
-
-`als-brightness.service` is a per-user service enabled for all login sessions.
-It stays resident and subscribes to
-`org.gnome.settings-daemon.plugins.power ambient-enabled` through
-`Gio.Settings`, so it reacts to the toggle immediately instead of polling;
-when the toggle is off it simply pauses, when it is on it runs the curve.
-Because the gsettings key defaults to true, automatic brightness is on out of
-the box — no extra watcher process needed.
-
-## Disable
-
-Turn it off (survives logins):
-
-``` bash
-gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false
-```
-
-Or remove the feature entirely:
-
-``` bash
-systemctl --user disable --now als-brightness.service
-```
-
-## Tuning the curve
-
-The seven steps and their lux thresholds live in
-`/usr/lib/pixel-blue/als-steps.conf`. Because `/usr` is read-only, put an
-override at `/etc/pixel-blue/als-steps.conf` with the same format:
-
-```
-# ui_percent  brightness_percent  down_lux  up_lux
-36.14 36.14 -1 90
-47.62 47.62 40 250
-```
-
-`-1` means "no transition in that direction": the first row has no down
-threshold and the last row has no up threshold. Restart the daemon after
-editing:
-
-``` bash
-systemctl --user restart als-brightness.service
-```
-
-## Caveats
-
-- The sensor is intentionally still published by `iio-sensor-proxy` so that
-  GNOME Settings keeps showing the **Automatic Brightness** switch. A D-Bus
-  policy (`/usr/share/dbus-1/system.d/zz-pixel-blue-als.conf`) denies
-  `ClaimLight()` instead, which stops gnome-settings-daemon from reading the
-  sensor and competing for the backlight. Because polling in
-  `iio-sensor-proxy` only runs while a client holds a claim, gsd gets no light
-  updates and leaves brightness to the daemon.
-- Transitions are stepwise, like ChromeOS, not continuous.
-- The sensor lux scale may differ slightly from ChromeOS; adjust the thresholds
-  in the override file if steps trigger at the wrong ambient light.
-- Experimental: check `journalctl --user -u als-brightness.service` if
-  something does not work.
 
 # Modifications to the Upstream
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
 - Improve Pixelbook Pen support.
-- Add experimental auto brightness using the Pixelbook (eve) vendor curve. (Opt-in, see below)
+- Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 
 # Learn More
 
