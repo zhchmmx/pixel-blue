@@ -88,11 +88,12 @@ is active, GNOME's own auto-brightness is kept out of the way.
 ## Enabled by default
 
 `als-brightness.service` is a per-user service enabled for all login sessions.
-It stays resident and reads `org.gnome.settings-daemon.plugins.power
-ambient-enabled` from inside its main loop (every 5 s); when the toggle is off
-it simply pauses, when it is on it runs the curve. Because the gsettings key
-defaults to true, automatic brightness is on out of the box — no extra watcher
-process needed.
+It stays resident and subscribes to
+`org.gnome.settings-daemon.plugins.power ambient-enabled` through
+`Gio.Settings`, so it reacts to the toggle immediately instead of polling;
+when the toggle is off it simply pauses, when it is on it runs the curve.
+Because the gsettings key defaults to true, automatic brightness is on out of
+the box — no extra watcher process needed.
 
 ## Disable
 

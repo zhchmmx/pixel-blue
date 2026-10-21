@@ -13,9 +13,10 @@ cp -avf "/ctx/system_files"/. /
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
 
-# D-Bus bindings used by the ALS auto-brightness daemon
-# (system_files/usr/bin/als-brightness-daemon.py writes through logind)
-dnf5 install -y python3-dbus
+# D-Bus bindings and GSettings (PyGObject) used by the ALS auto-brightness
+# daemon (system_files/usr/bin/als-brightness-daemon.py): logind for the
+# backlight, Gio.Settings for the ambient-enabled toggle
+dnf5 install -y python3-dbus python3-gobject-base
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
