@@ -194,5 +194,23 @@ systemctl --global enable wacom-stylus-keyfile.service
 systemctl --global enable als-brightness.service
 
 
+### Branding
+#
+# Replace the inherited Fedora logo (issue #54). The logo master lives at
+# system_files/usr/share/pixel-blue/logos/ and the same artwork is installed
+# as a hicolor scalable icon (pixel-blue-logo-icon.svg) by the cp at the top
+# of this script. Point os-release's LOGO= at it so GNOME surfaces that
+# render the distribution logo (Settings -> About, Overview, GNOME Software)
+# pick up Pixel Blue artwork instead of the Fedora ring. Only the LOGO key
+# is rewritten: NAME/PRETTY_NAME keep the Fedora strings and ID=fedora and
+# the VARIANT* keys stay untouched (Flatpak / GNOME Software detection and
+# the Anaconda Silverblue ISO profile depend on them).
+
+if grep -q '^LOGO=' /usr/lib/os-release; then
+  sed -i 's|^LOGO=.*|LOGO=pixel-blue-logo-icon|' /usr/lib/os-release
+else
+  echo 'LOGO=pixel-blue-logo-icon' >> /usr/lib/os-release
+fi
+
 # Clean up dnf cache to reduce image size
 dnf5 clean all
