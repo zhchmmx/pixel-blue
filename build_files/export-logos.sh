@@ -10,6 +10,8 @@
 #   - forced-white consumers (dark surfaces): pixmaps/system-logo-white.png
 #   - hicolor PNG ladder (legacy/low-DPI icon fallback): icons/hicolor/NNxNN/apps
 #   - ArtifactHub logo (IMAGE_LOGO_URL in image-template.env): pixel-blue.png
+#   - Anaconda installer sidebar (lorax runtime, see installer-branding.tmpl):
+#     anaconda/pixmaps/sidebar-logo.png
 
 set -euo pipefail
 
@@ -28,6 +30,17 @@ mkdir -p system_files/usr/share/pixmaps
 cairosvg "$LOGOS/pixel-blue-symbol-white.svg" \
   -o system_files/usr/share/pixmaps/system-logo-white.png \
   --output-width 256 --output-height 256
+
+# Anaconda installer sidebar logo (the Silverblue profile's stylesheet puts
+# the .logo slot at the bottom of a blue sidebar; fedora-logos ships the
+# white Fedora mark there at 112x97, so export the white symbol square).
+# Installed into the ISO's installer environment by
+# build_files/installer-branding.tmpl, NOT by the container image; this
+# path is just the regeneration home.
+mkdir -p system_files/usr/share/anaconda/pixmaps
+cairosvg "$LOGOS/pixel-blue-symbol-white.svg" \
+  -o system_files/usr/share/anaconda/pixmaps/sidebar-logo.png \
+  --output-width 128 --output-height 128
 
 # hicolor PNG ladder mirroring fedora-logos' sizes.
 for s in 16 22 24 32 36 48 96 256; do

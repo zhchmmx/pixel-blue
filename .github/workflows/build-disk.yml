@@ -103,6 +103,9 @@ jobs:
   # variant=Silverblue selects Anaconda's fedora-silverblue profile: the
   # installer only asks for the destination, and account/timezone setup
   # happens in gnome-initial-setup on first boot, like the official Fedora ISO.
+  # build_files/installer-branding.tmpl (passed as additional_templates)
+  # overwrites the installer's own sidebar logo, which comes from the
+  # installer environment's fedora-logos, not from our container image.
   build-iso:
     name: Build anaconda ISO
     runs-on: ubuntu-24.04
@@ -165,6 +168,11 @@ jobs:
           flatpak_remote_name: flathub
           flatpak_remote_url: https://flathub.org/repo/flathub.flatpakrepo
           flatpak_remote_refs_dir: flatpak_refs
+          # Lorax runtime template that overwrites the Anaconda sidebar
+          # logo in the installer environment (issue #54). The container
+          # mounts this checkout at /github/workspace, so the template is
+          # addressed by its path inside the container.
+          additional_templates: /github/workspace/build_files/installer-branding.tmpl
 
       - name: Upload ISO and Checksum to Job Artifacts
         if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'
