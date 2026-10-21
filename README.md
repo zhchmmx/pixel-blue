@@ -137,7 +137,7 @@ systemctl --user restart als-brightness.service
 
 - The sensor is intentionally still published by `iio-sensor-proxy` so that
   GNOME Settings keeps showing the **Automatic Brightness** switch. A D-Bus
-  policy (`/etc/dbus-1/system.d/50-pixel-blue-als.conf`) denies
+  policy (`/usr/share/dbus-1/system.d/zz-pixel-blue-als.conf`) denies
   `ClaimLight()` instead, which stops gnome-settings-daemon from reading the
   sensor and competing for the backlight. Because polling in
   `iio-sensor-proxy` only runs while a client holds a claim, gsd gets no light
