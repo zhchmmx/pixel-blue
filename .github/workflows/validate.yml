@@ -1,0 +1,440 @@
+---
+name: Validate
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Shell: 3 scripts, discovered by shebang (no .sh extension requirement)
+  # ---------------------------------------------------------------------------
+  shell:
+    name: Shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install shellcheck and shfmt
+        id: install
+        run: |
+          set -uo pipefail
+          sc=ok
+          sf=ok
+
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shellcheck || true
+          fi
+          command -v shellcheck >/dev/null 2>&1 || sc=missing
+
+          if ! command -v shfmt >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shfmt || true
+          fi
+          command -v shfmt >/dev/null 2>&1 || sf=missing
+
+          echo "SHELLCHECK_STATE=$sc" >> "$GITHUB_ENV"
+          echo "SHFMT_STATE=$sf" >> "$GITHUB_ENV"
+          shellcheck --version 2>/dev/null | head -n 2 || true
+          shfmt --version 2>/dev/null || true
+
+      # The classifier is shebang based on purpose: a new script without a .sh
+      # suffix must still be checked. bash is tested before sh because
+      # "#!/usr/bin/env bash" also contains the substring "sh".
+      - name: Discover shell scripts by shebang
+        run: |
+          set -euo pipefail
+          bash_files=()
+          sh_files=()
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            [ "$(head -c 2 "$f" 2>/dev/null)" = '#!' ] || continue
+            first=$(head -n 1 "$f" | tr -d '\r')
+            case "$first" in
+              '#!'*bash*) bash_files+=("$f") ;;
+              '#!'*sh*)   sh_files+=("$f") ;;
+            esac
+          done < <(git ls-files)
+
+          echo "discovered: bash=${#bash_files[@]} sh=${#sh_files[@]}"
+          if [ $(( ${#bash_files[@]} + ${#sh_files[@]} )) -eq 0 ]; then
+            echo "::error::no shell scripts discovered - the shebang classifier is broken"
+            exit 1
+          fi
+          : > "$RUNNER_TEMP/bash_files.txt"
+          : > "$RUNNER_TEMP/sh_files.txt"
+          if [ ${#bash_files[@]} -gt 0 ]; then printf '%s\n' "${bash_files[@]}" > "$RUNNER_TEMP/bash_files.txt"; fi
+          if [ ${#sh_files[@]} -gt 0 ]; then printf '%s\n' "${sh_files[@]}" > "$RUNNER_TEMP/sh_files.txt"; fi
+
+      - name: Syntax check (bash -n / sh -n)
+        run: |
+          set -uo pipefail
+          rc=0
+          while IFS= read -r f; do
+            echo "--- bash -n $f"
+            bash -n "$f" || rc=1
+          done < "$RUNNER_TEMP/bash_files.txt"
+          while IFS= read -r f; do
+            echo "--- sh -n $f"
+            sh -n "$f" || rc=1
+          done < "$RUNNER_TEMP/sh_files.txt"
+          exit "$rc"
+
+      - name: shellcheck
+        run: |
+          set -uo pipefail
+          if [ "${SHELLCHECK_STATE:-missing}" != "ok" ]; then
+            echo "::error::shellcheck is not available on this runner"
+            exit 1
+          fi
+          mapfile -t files < <(cat "$RUNNER_TEMP/bash_files.txt" "$RUNNER_TEMP/sh_files.txt")
+          shellcheck --severity=warning --external-sources "${files[@]}"
+
+      # Formatting tier: advisory, never blocks the validate gate.
+      - name: shfmt -d (advisory)
+        if: env.SHFMT_STATE == 'ok'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mapfile -t files < <(cat "$RUNNER_TEMP/bash_files.txt" "$RUNNER_TEMP/sh_files.txt")
+          shfmt -d -i 2 "${files[@]}" || {
+            echo "::warning::shfmt reports formatting differences (advisory, fix locally with 'shfmt -w -i 2 <file>')"
+            exit 1
+          }
+
+  # ---------------------------------------------------------------------------
+  # Python: 1 daemon, discovered by shebang (#! ... python)
+  # ---------------------------------------------------------------------------
+  python:
+    name: Python
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install ruff
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet --disable-pip-version-check "ruff>=0.6,<1"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/ruff" --version
+
+      - name: Discover python files by shebang
+        run: |
+          set -euo pipefail
+          py_files=()
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            [ "$(head -c 2 "$f" 2>/dev/null)" = '#!' ] || continue
+            case "$(head -n 1 "$f" | tr -d '\r')" in
+              '#!'*python*) py_files+=("$f") ;;
+            esac
+          done < <(git ls-files)
+
+          echo "discovered: python=${#py_files[@]}"
+          if [ ${#py_files[@]} -eq 0 ]; then
+            echo "::error::no python files discovered - the shebang classifier is broken"
+            exit 1
+          fi
+          printf '%s\n' "${py_files[@]}" > "$RUNNER_TEMP/py_files.txt"
+
+      # compile() instead of py_compile: py_compile writes the .pyc through
+      # _write_atomic(), which cannot target /dev/null on a non-root runner.
+      - name: Syntax check (compile)
+        run: |
+          set -euo pipefail
+          mapfile -t files < "$RUNNER_TEMP/py_files.txt"
+          python3 - "${files[@]}" <<'PY'
+          import sys
+
+          rc = 0
+          for name in sys.argv[1:]:
+              with open(name, encoding='utf-8') as fh:
+                  source = fh.read()
+              try:
+                  compile(source, name, 'exec')
+                  print('ok: ' + name)
+              except SyntaxError as exc:
+                  print('::error file=%s,line=%s::%s' % (name, exc.lineno, exc.msg))
+                  rc = 1
+          sys.exit(rc)
+          PY
+
+      # E501 stays meaningful because the daemon's longest line is 105 chars.
+      - name: ruff check
+        run: |
+          set -euo pipefail
+          mapfile -t files < "$RUNNER_TEMP/py_files.txt"
+          ruff --isolated --no-cache check \
+            --target-version py310 --line-length 120 \
+            --select E,W,F,I "${files[@]}"
+
+      # Formatting tier: advisory, never blocks the validate gate.
+      - name: ruff format --check (advisory)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mapfile -t files < "$RUNNER_TEMP/py_files.txt"
+          ruff --isolated --no-cache format --check --diff \
+            --line-length 120 "${files[@]}" || {
+            echo "::warning::ruff format reports formatting differences (advisory, run 'ruff format --line-length 120 <file>' locally)"
+            exit 1
+          }
+
+  # ---------------------------------------------------------------------------
+  # Data files: TOML / JSON / XML / keyfile / systemd units / flatpak refs
+  # Zero install: jq is not needed, python3 stdlib covers everything.
+  # ---------------------------------------------------------------------------
+  data:
+    name: Data files
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Classification order matters and must not be reordered:
+      #   systemd dir (its first line is "[Unit]")
+      #   -> extension (.toml: "[[customizations.filesystem]]" also looks like a
+      #      keyfile section header)
+      #   -> XML sniff -> keyfile sniff
+      - name: Structured files (TOML / JSON / XML / keyfile / systemd)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import configparser
+          import json
+          import pathlib
+          import re
+          import subprocess
+          import sys
+          import tomllib
+          import xml.etree.ElementTree as ET
+
+          UNIT_PREFIX = 'system_files/usr/lib/systemd/'
+          UNIT_SUFFIXES = ('.service', '.timer')
+          REFS_PREFIX = 'flatpak_refs/'
+          TIMER_TRIGGERS = (
+              'OnBootSec', 'OnStartupSec', 'OnActiveSec',
+              'OnUnitActiveSec', 'OnUnitInactiveSec', 'OnCalendar',
+          )
+          KEYFILE_HEADER = re.compile(r'^\[.+\]$')
+
+
+          def first_meaningful_line(text):
+              for line in text.splitlines():
+                  stripped = line.strip()
+                  if stripped and not stripped.startswith('#'):
+                      return stripped
+              return ''
+
+
+          def check_unit(rel, text):
+              parser = configparser.ConfigParser(interpolation=None, strict=False)
+              parser.optionxform = str  # keep ExecStart / WantedBy casing
+              try:
+                  parser.read_string(text, source=rel)
+              except configparser.Error as exc:
+                  return [str(exc)]
+              problems = []
+              if not parser.has_section('Unit'):
+                  problems.append('missing [Unit] section')
+              if not parser.has_section('Install'):
+                  problems.append('missing [Install] section')
+              elif not parser.has_option('Install', 'WantedBy'):
+                  problems.append('missing WantedBy in [Install]')
+              if rel.endswith('.service'):
+                  if not parser.has_section('Service'):
+                      problems.append('missing [Service] section')
+                  elif not parser.has_option('Service', 'ExecStart'):
+                      problems.append('missing ExecStart in [Service]')
+              if rel.endswith('.timer'):
+                  if not parser.has_section('Timer'):
+                      problems.append('missing [Timer] section')
+                  elif not any(parser.has_option('Timer', key) for key in TIMER_TRIGGERS):
+                      problems.append('no trigger directive in [Timer]')
+              return problems
+
+
+          def check_keyfile(rel, text):
+              parser = configparser.ConfigParser(interpolation=None, strict=True)
+              try:
+                  parser.read_string(text, source=rel)
+              except configparser.Error as exc:
+                  return [str(exc)]
+              if not parser.sections():
+                  return ['no sections found']
+              return []
+
+
+          def main():
+              tracked = subprocess.run(
+                  ['git', 'ls-files', '-z'], capture_output=True, check=True
+              ).stdout.split(b'\0')
+              counts = {'toml': 0, 'json': 0, 'xml': 0, 'keyfile': 0, 'unit': 0}
+              failures = 0
+
+              for raw_name in tracked:
+                  if not raw_name:
+                      continue
+                  rel = raw_name.decode('utf-8')
+                  path = pathlib.Path(rel)
+                  if not path.is_file():
+                      continue
+                  data = path.read_bytes()
+                  if not data.strip():
+                      continue
+                  try:
+                      text = data.decode('utf-8')
+                  except UnicodeDecodeError:
+                      continue
+                  if rel.startswith(REFS_PREFIX):
+                      continue
+
+                  problems = []
+                  if rel.startswith(UNIT_PREFIX) and path.suffix in UNIT_SUFFIXES:
+                      counts['unit'] += 1
+                      problems = check_unit(rel, text)
+                  elif path.suffix == '.toml':
+                      counts['toml'] += 1
+                      try:
+                          tomllib.loads(text)
+                      except tomllib.TOMLDecodeError as exc:
+                          problems = [str(exc)]
+                  elif path.suffix == '.json':
+                      counts['json'] += 1
+                      try:
+                          json.loads(text)
+                      except json.JSONDecodeError as exc:
+                          problems = ['%s (line %d, column %d)' % (exc.msg, exc.lineno, exc.colno)]
+                  else:
+                      head = first_meaningful_line(text)
+                      if head.startswith('<'):
+                          counts['xml'] += 1
+                          try:
+                              ET.fromstring(data)  # expat never fetches the DTD
+                          except ET.ParseError as exc:
+                              problems = [str(exc)]
+                      elif KEYFILE_HEADER.match(head):
+                          counts['keyfile'] += 1
+                          problems = check_keyfile(rel, text)
+
+                  if problems:
+                      for problem in problems:
+                          print('::error file=%s::%s' % (rel, problem))
+                      failures += 1
+                  else:
+                      print('ok: ' + rel)
+
+              print('classified: ' + ' '.join('%s=%d' % item for item in counts.items()))
+              for name, value in counts.items():
+                  if value == 0:
+                      print('::error::no %s files discovered - the classifier is broken' % name)
+                      failures += 1
+              return 1 if failures else 0
+
+
+          sys.exit(main())
+          PY
+
+      - name: flatpak refs
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          PATTERN = re.compile(r'^(app|runtime)/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$')
+          root = pathlib.Path('flatpak_refs')
+          if not root.is_dir():
+              print('::error file=flatpak_refs::directory not found')
+              sys.exit(1)
+
+          files = sorted(entry for entry in root.iterdir() if entry.is_file())
+          failures = 0
+          for path in files:
+              data = path.read_bytes()
+              lines = [line.strip() for line in data.decode('utf-8').splitlines() if line.strip()]
+              problems = []
+              if len(lines) != 1:
+                  problems.append('expected exactly 1 flatpak ref, found %d' % len(lines))
+              elif not PATTERN.match(lines[0]):
+                  problems.append('invalid flatpak ref: %r' % lines[0])
+              if data and not data.endswith(b'\n'):
+                  problems.append('file does not end with a newline')
+              if problems:
+                  for problem in problems:
+                      print('::error file=%s::%s' % (path.as_posix(), problem))
+                  failures += 1
+
+          print('checked %d flatpak refs' % len(files))
+          if not files:
+              print('::error::no flatpak refs found')
+              failures += 1
+          sys.exit(1 if failures else 0)
+          PY
+
+      # Semantic tier: the runner has neither the ExecStart binaries nor
+      # graphical-session.target, so this is advisory by design.
+      - name: systemd-analyze verify (advisory)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          shopt -s nullglob
+          units=(system_files/usr/lib/systemd/user/*.service system_files/usr/lib/systemd/user/*.timer)
+          if [ ${#units[@]} -eq 0 ]; then
+            echo "::error::no systemd user units found"
+            exit 1
+          fi
+          rc=0
+          for u in "${units[@]}"; do
+            echo "--- systemd-analyze verify $u"
+            systemd-analyze verify --man=no "./$u" || rc=1
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::systemd-analyze verify reported issues (advisory: the runner lacks the ExecStart binaries and graphical-session.target)"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate: the only check the ruleset needs to require.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: always()
+    needs:
+      - shell
+      - python
+      - data
+    steps:
+      - name: Aggregate result
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$RESULTS" | jq -r 'to_entries[] | "\(.key)=\(.value.result)"'
+          failed=$(printf '%s' "$RESULTS" | jq '[to_entries[] | select(.value.result != "success" and .value.result != "skipped")] | length')
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::$failed validation job(s) did not succeed"
+            exit 1
+          fi
+          echo "all validation jobs succeeded"
