@@ -68,12 +68,13 @@ Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
 
+
 # Modifications to the Upstream
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
 - Improve Pixelbook Pen support.
-- Improve auto brightness via [wluma](https://github.com/max-baz/wluma). (In progress)
+- Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 
 # Learn More
 
