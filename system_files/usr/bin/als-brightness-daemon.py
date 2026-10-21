@@ -170,47 +170,71 @@ def select_step(steps: list, current: int, lux: float) -> int:
     return current
 
 
+LOGIN1_NAME = "org.freedesktop.login1"
+LOGIN1_PATH = "/org/freedesktop/login1"
+SESSION_IFACE = "org.freedesktop.login1.Session"
+
+
+def session_is_usable(bus, path: str, uid: int) -> bool:
+    """Check whether we may call SetBrightness() on this session.
+
+    logind refuses sessions without a seat ("Your session has no seat"),
+    sessions that are not in the foreground of their seat, and sessions
+    owned by another user.
+    """
+    props = dbus.Interface(
+        bus.get_object(LOGIN1_NAME, path), "org.freedesktop.DBus.Properties"
+    )
+    try:
+        user = props.Get(SESSION_IFACE, "User")
+        seat = props.Get(SESSION_IFACE, "Seat")
+        if int(user[0]) != uid or not seat[0]:
+            return False
+        return bool(props.Get(SESSION_IFACE, "Active"))
+    except dbus.DBusException:
+        return False
+
+
 def find_logind_session(bus, manager) -> str:
     """Return the logind session that is allowed to write the backlight.
 
     Services started by the per-user systemd manager live in user@UID.service,
     which is not part of any logind session, so GetSessionByPID() on our own
-    PID fails with "PID ... does not belong to any known session". Fall back
-    to XDG_SESSION_ID and then to the active session of the same user.
+    PID fails with "PID ... does not belong to any known session". Try
+    XDG_SESSION_ID and the sessions of this user instead. Only sessions that
+    own a seat and are in the foreground of that seat can change brightness.
     """
+    uid = os.getuid()
+    candidates = []
+
     session_id = os.environ.get("XDG_SESSION_ID", "").strip()
     if session_id:
         try:
-            return str(manager.GetSession(session_id))
+            candidates.append(str(manager.GetSession(session_id)))
         except dbus.DBusException:
             pass
 
     try:
-        return str(manager.GetSessionByPID(dbus.UInt32(os.getpid())))
+        candidates.append(str(manager.GetSessionByPID(dbus.UInt32(os.getpid()))))
     except dbus.DBusException:
         pass
 
-    uid = os.getuid()
-    fallback = None
-    for _id, session_uid, _user, _seat, path in manager.ListSessions():
-        if int(session_uid) != uid:
-            continue
-        if fallback is None:
-            fallback = str(path)
-        props = dbus.Interface(
-            bus.get_object("org.freedesktop.login1", path),
-            "org.freedesktop.DBus.Properties",
-        )
-        try:
-            if bool(props.Get("org.freedesktop.login1.Session", "Active")):
-                return str(path)
-        except dbus.DBusException:
-            continue
+    try:
+        for _id, session_uid, _user, _seat, path in manager.ListSessions():
+            if int(session_uid) == uid:
+                candidates.append(str(path))
+    except dbus.DBusException:
+        pass
 
-    if fallback is not None:
-        return fallback
+    seen = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if session_is_usable(bus, path, uid):
+            return path
 
-    raise RuntimeError("no logind session found for uid %d" % uid)
+    raise RuntimeError("no active logind session with a seat for uid %d" % uid)
 
 
 class Backlight:
@@ -219,17 +243,32 @@ class Backlight:
     def __init__(self, device: str, max_level: int) -> None:
         self._device = device
         self._max_level = max_level
-        bus = dbus.SystemBus()
-        manager = dbus.Interface(
-            bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1"),
+        self._bus = dbus.SystemBus()
+        self._manager = dbus.Interface(
+            self._bus.get_object(LOGIN1_NAME, LOGIN1_PATH),
             "org.freedesktop.login1.Manager",
         )
-        session_path = find_logind_session(bus, manager)
-        self._session = dbus.Interface(
-            bus.get_object("org.freedesktop.login1", session_path),
-            "org.freedesktop.login1.Session",
-        )
+        self._session = None
+        self._session_path = None
+        self._session_error = 0.0
         self._last_error = 0.0
+
+    def _resolve_session(self) -> bool:
+        try:
+            path = find_logind_session(self._bus, self._manager)
+        except (dbus.DBusException, RuntimeError) as exc:
+            now = time.monotonic()
+            if now - self._session_error >= ERROR_LOG_INTERVAL:
+                self._session_error = now
+                LOG.error("no usable logind session yet: %s", exc)
+            return False
+        if path != self._session_path:
+            LOG.info("using logind session %s", path)
+            self._session_path = path
+            self._session = dbus.Interface(
+                self._bus.get_object(LOGIN1_NAME, path), SESSION_IFACE
+            )
+        return True
 
     def set_percent(self, percent: float) -> bool:
         # logind's SetBrightness() takes an absolute value in the
@@ -237,9 +276,15 @@ class Backlight:
         # percentage.
         value = int(round(percent * self._max_level / 100.0))
         value = max(1, min(self._max_level, value))
+        if not self._resolve_session():
+            return False
         try:
             self._session.SetBrightness("backlight", self._device, dbus.UInt32(value))
         except dbus.DBusException as exc:
+            # The session may have been replaced (seat switch, screen lock,
+            # login elsewhere); look it up again on the next attempt.
+            self._session = None
+            self._session_path = None
             now = time.monotonic()
             if now - self._last_error >= ERROR_LOG_INTERVAL:
                 self._last_error = now
