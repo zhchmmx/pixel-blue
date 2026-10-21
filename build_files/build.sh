@@ -185,6 +185,11 @@ systemctl enable podman.socket
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
 
+# Watch the GNOME "Automatic Brightness" toggle and start/stop the ALS daemon
+# with it. ambient-enabled defaults to true, so auto brightness is on by
+# default; turning the toggle off stops the daemon.
+systemctl --global enable ambient-watch.service
+
 
 # Clean up dnf cache to reduce image size
 dnf5 clean all
