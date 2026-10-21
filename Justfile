@@ -383,6 +383,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="4
       IMAGE_TAG="{{ tag }}" \
       VERSION="{{ version }}" \
       VARIANT="Silverblue" \
+      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl" \
       FLATPAK_REMOTE_NAME="flathub" \
       FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
       FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \
