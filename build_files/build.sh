@@ -46,6 +46,7 @@ ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
 # or rpm-ostree/bootc layering.
 
 dnf5 remove -y firefox firefox-langpacks
+dnf5 remove -y gnome-shell-extension-background-logo
 
 ### Audio configuration for Pixelbook (eve)
 #
