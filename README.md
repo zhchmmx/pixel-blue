@@ -68,85 +68,95 @@ Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
 
-# Experimental automatic brightness
 
-The image ships an experimental ambient-light auto-brightness daemon built
-around the Pixelbook (eve) vendor curve taken from ChromeOS `power_manager`. It
-is enabled by default and follows GNOME's automatic brightness toggle; while it
-is active, GNOME's own auto-brightness is kept out of the way.
+# Keyboard Layout (ChromeOS-style)
 
-## What it does
+The Pixelbook keyboard has no Home/End, Page Up/Down, forward Delete, Caps Lock
+or dedicated F1–F12 keys. The image uses [keyd](https://github.com/rvaiya/keyd)
+so these are reached with the **Search** and **Alt** keys, exactly the way
+ChromeOS does it — with one deliberate exception: the page keys (`Alt+↑/↓`)
+are left unmapped so apps keep them (see **Alt held**). The combos follow
+the official Google shortcut list, and the
+keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
+(verified against upstream `gsettings-desktop-schemas`). The config lives in
+`system_files/etc/keyd/cros.conf` (plus `system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`
+for the Assistant key); this table is the human-readable reference.
 
-- seven brightness steps with the vendor down/up lux thresholds (hysteresis),
-  so brightness does not flap around a single lux value
-- exponential smoothing of the sensor readings
-- the ChromeOS non-linear percent-to-backlight curve
-- a short ramp between steps instead of an instant jump
-- if you change the brightness yourself, the daemon yields; it takes control
-  back once the ambient light changes by more than 100 lux
+Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
+[Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
+GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybindings`.
 
-## Enabled by default
+## Top row (bare press)
 
-`ambient-watch.service` is enabled for all users by default and follows
-GNOME's **Settings → Power → Automatic Brightness** toggle: with the toggle on,
-`als-brightness.service` runs; with it off, the daemon stops. Because the
-gsettings key defaults to true, automatic brightness is on out of the box.
+| Physical key | ChromeOS role | Emits on Pixel Blue |
+| --- | --- | --- |
+| `Esc` | Cancel | `Esc` (native) |
+| `Back` | Back | `Back` (native media key) |
+| `Refresh` | Forward | `Refresh` (native media key) |
+| `Fullscreen` (`zoom`) | Fullscreen | `F11` (bare `KEY_ZOOM` does nothing in GNOME) |
+| `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
+| `Brightness −` / `+` | Brightness | native pass-through |
+| `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
+| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
 
-If you disabled the watcher earlier, enable it again with:
+## Search (Meta) held
 
-``` bash
-systemctl --user enable --now ambient-watch.service
-```
+`Search` is natively `Meta`, so its own combos (`Search` alone, `Search+L` lock,
+`Search+A`, `Search+V` …) are GNOME-native and left untouched.
 
-## Disable
+| Combo | Emits | Function |
+| --- | --- | --- |
+| `Search` + `Back`…`Vol +` | `F1`–`F10` | the official top-row F-keys |
+| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key) |
+| `Search` + `←` / `→` | bare `Home` / `End` | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
+| `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End` | select to line start / end |
+| `Search` + `Ctrl` + `←` / `→` | `Ctrl+Home` / `Ctrl+End` | start / end of document |
+| `Search` + `[` / `]` | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace |
+| `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down` | move window to previous / next workspace |
+| `Search` + `Alt` | `Caps Lock` | Caps Lock (either order) |
 
-Stop the daemon but keep the watcher enabled (survives logins):
+## Alt held
 
-``` bash
-gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false
-```
+| Combo | Emits | Function |
+| --- | --- | --- |
+| `Alt` + `Backspace` | `Delete` | forward delete |
+| `Alt` + `Search` | `Caps Lock` | Caps Lock |
+| `Alt` + `Brightness −` / `+` | keyboard backlight | native pass-through |
 
-Or remove the feature entirely:
+`Ctrl+Alt+↑/↓` and `Ctrl+Alt+←/→` are **not** remapped — GNOME binds them to workspace
+switching, and the owner chose to keep that. Bare `Alt+←/→` is likewise left untouched
+(apps use it for back/forward), since ChromeOS does not use it for text navigation.
+The official ChromeOS page keys, `Alt+↑/↓`, are deliberately **not** mapped either:
+keyd sits below the app layer, so binding them globally would cost GNOME Files its
+parent-folder shortcut (`Alt+↑`) and editors their move-line bindings (`Alt+↑/↓`) —
+the owner chose to keep those app shortcuts instead.
 
-``` bash
-systemctl --user disable --now ambient-watch.service
-systemctl --user stop als-brightness.service
-```
+## Function keys & the Assistant key
 
-## Tuning the curve
+- `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
+- **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
+  hwdb to `F13`. `F13` has no GNOME default, so bind it to any custom shortcut in
+  Settings → Keyboard → Custom Shortcuts.
+- `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
 
-The seven steps and their lux thresholds live in
-`/usr/lib/pixel-blue/als-steps.conf`. Because `/usr` is read-only, put an
-override at `/etc/pixel-blue/als-steps.conf` with the same format:
+## Caveats & not-mapped items
 
-```
-# ui_percent  brightness_percent  down_lux  up_lux
-36.14 36.14 -1 90
-47.62 47.62 40 250
-```
-
-`-1` means "no transition in that direction": the first row has no down
-threshold and the last row has no up threshold. Restart the daemon after
-editing:
-
-``` bash
-systemctl --user restart als-brightness.service
-```
-
-## Caveats
-
-- The sensor is intentionally still published by `iio-sensor-proxy` so that
-  GNOME Settings keeps showing the **Automatic Brightness** switch. A D-Bus
-  policy (`/usr/share/dbus-1/system.d/zz-pixel-blue-als.conf`) denies
-  `ClaimLight()` instead, which stops gnome-settings-daemon from reading the
-  sensor and competing for the backlight. Because polling in
-  `iio-sensor-proxy` only runs while a client holds a claim, gsd gets no light
-  updates and leaves brightness to the daemon.
-- Transitions are stepwise, like ChromeOS, not continuous.
-- The sensor lux scale may differ slightly from ChromeOS; adjust the thresholds
-  in the override file if steps trigger at the wrong ambient light.
-- Experimental: check `journalctl --user -u als-brightness.service` if
-  something does not work.
+- **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
+  opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
+  straight to the screenshot UI and does not keep the original key.
+- **Right Alt**: mapped to behave as a plain `Alt` so the `Alt` combos work with either
+  Alt. If a real ChromeOS device shows right Alt does *not* trigger Alt combos, remove
+  `rightalt = layer(alt)`.
+- **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
+  touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
+  combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
+- **Device-verify before trusting**: run `sudo keyd check` after editing, and use
+  `keyd monitor` to confirm (a) the Assistant key really reports scancode `0xd8`, and
+  (b) the top row arrives as media codes (`back`, `zoom`, `scale`, `sleep`, …) as this
+  config assumes. Some firmware/distro states report the top row as `f1`–`f10` instead;
+  if `keyd monitor` shows that, the left-hand key names above (`zoom`, `scale`, `sleep`,
+  and the `back`…`volumeup` list under Search) must be rewritten to the `f1`–`f13` codes.
+  The Three-lines key is likewise assumed to arrive as `sleep`.
 
 # Modifications to the Upstream
 
@@ -154,7 +164,7 @@ systemctl --user restart als-brightness.service
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
 - Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware decoding. AAC and HEVC (8/10-bit) decode is accelerated on the Pixelbook's Kaby Lake iGPU via `intel-media-driver` (iHD, swapped in from RPM Fusion nonfree); check it with `vainfo`.
 - Improve Pixelbook Pen support.
-- Add experimental auto brightness using the Pixelbook (eve) vendor curve. (Opt-in, see below)
+- Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
 
 # Waydroid First-Time Setup
