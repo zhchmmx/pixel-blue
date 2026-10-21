@@ -185,10 +185,12 @@ systemctl enable podman.socket
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
 
-# Watch the GNOME "Automatic Brightness" toggle and start/stop the ALS daemon
-# with it. ambient-enabled defaults to true, so auto brightness is on by
-# default; turning the toggle off stops the daemon.
-systemctl --global enable ambient-watch.service
+# The ALS daemon is a per-user resident service; it reads
+# org.gnome.settings-daemon.plugins.power ambient-enabled inline and pauses
+# when the toggle is off. Enabling it globally means it starts for every
+# login session, whether the toggle is on or off — daemon checks gsettings
+# each cycle and no-ops until the user turns it on.
+systemctl --global enable als-brightness.service
 
 
 # Clean up dnf cache to reduce image size

@@ -26,6 +26,7 @@ import logging
 import math
 import os
 import signal
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -50,6 +51,8 @@ RECLAIM_LUX = 100.0  # ambient change needed to take control back
 MIN_VISIBLE_FRACTION = 0.006  # eve min_visible_level / max_level (~0.6%)
 CURVE_OFFSET = 6.25  # ChromeOS: lowest usable user-visible percentage
 ERROR_LOG_INTERVAL = 60.0
+SETTINGS_CHECK_INTERVAL = 5.0  # seconds between ambient-enabled checks
+SETTINGS_KEY = "org.gnome.settings-daemon.plugins.power ambient-enabled"
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,25 @@ def read_lux(sensor: Path, scale: float) -> float | None:
         return max(0.0, float(sensor.read_text(encoding="utf-8").strip()) * scale)
     except (OSError, ValueError):
         return None
+
+
+def read_ambient_enabled() -> bool:
+    """Read the GNOME Automatic Brightness toggle.
+
+    We used to have a separate shell script poll this and start/stop the
+    daemon; keeping the daemon resident and inlining the check removes that
+    extra process and lets us react to toggle changes without logind dance.
+    """
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", *SETTINGS_KEY.split()],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def find_backlight() -> tuple:
@@ -346,9 +368,13 @@ def main() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
+    ambient_on = read_ambient_enabled()
+    LOG.info("ambient-enabled = %s", "true" if ambient_on else "false")
+
     current_step = 0
     smoothed = None
     last_sample = time.monotonic()
+    last_settings_check = last_sample
     last_sent = [read_brightness_percent(brightness_path, max_level)]
     yielded = False
     yield_lux = 0.0
@@ -361,6 +387,26 @@ def main() -> int:
         now = time.monotonic()
         elapsed = now - last_sample
         last_sample = now
+
+        if now - last_settings_check >= SETTINGS_CHECK_INTERVAL:
+            last_settings_check = now
+            new_state = read_ambient_enabled()
+            if new_state != ambient_on:
+                ambient_on = new_state
+                yielded = False
+                yield_lux = 0.0
+                if ambient_on:
+                    # The user may have adjusted brightness manually while
+                    # auto was off; rebaseline so we don't overwrite it.
+                    current = read_brightness_percent(brightness_path, max_level)
+                    last_sent[0] = (
+                        int(round(current)) if current is not None else last_sent[0]
+                    )
+                    LOG.info("ambient-enabled -> true, rebaseline %s", last_sent[0])
+                else:
+                    LOG.info("ambient-enabled -> false, pausing")
+            if not ambient_on:
+                continue
 
         lux = read_lux(sensor, scale)
         if lux is None:
