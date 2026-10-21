@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import dbus
+from gi.repository import Gio, GLib
 
 LOG = logging.getLogger("als-brightness")
 
@@ -50,6 +51,8 @@ RECLAIM_LUX = 100.0  # ambient change needed to take control back
 MIN_VISIBLE_FRACTION = 0.006  # eve min_visible_level / max_level (~0.6%)
 CURVE_OFFSET = 6.25  # ChromeOS: lowest usable user-visible percentage
 ERROR_LOG_INTERVAL = 60.0
+SETTINGS_SCHEMA = "org.gnome.settings-daemon.plugins.power"
+SETTINGS_KEY = "ambient-enabled"
 
 
 @dataclass(frozen=True)
@@ -337,14 +340,14 @@ def main() -> int:
         LOG.error("cannot attach to the logind session: %s", exc)
         return 1
 
-    running = True
+    try:
+        settings = Gio.Settings.new(SETTINGS_SCHEMA)
+        ambient_on = settings.get_boolean(SETTINGS_KEY)
+    except GLib.Error as exc:
+        LOG.error("cannot read GNOME power settings: %s", exc)
+        return 1
 
-    def stop(_signum, _frame):
-        nonlocal running
-        running = False
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
+    loop = GLib.MainLoop()
 
     current_step = 0
     smoothed = None
@@ -353,10 +356,35 @@ def main() -> int:
     yielded = False
     yield_lux = 0.0
 
-    while running:
-        time.sleep(POLL_INTERVAL)
-        if not running:
-            break
+    LOG.info("ambient-enabled = %s", "true" if ambient_on else "false")
+
+    def on_ambient_changed(_settings, _key):
+        nonlocal ambient_on, smoothed, last_sample, yielded, yield_lux
+        state = settings.get_boolean(SETTINGS_KEY)
+        if state == ambient_on:
+            return
+        ambient_on = state
+        yielded = False
+        yield_lux = 0.0
+        # Start filtering from a fresh reading instead of stale lux values.
+        smoothed = None
+        last_sample = time.monotonic()
+        if ambient_on:
+            # The user may have adjusted brightness manually while auto was
+            # off; rebaseline so we don't overwrite it.
+            current = read_brightness_percent(brightness_path, max_level)
+            if current is not None:
+                last_sent[0] = int(round(current))
+            LOG.info("ambient-enabled -> true, rebaseline %s", last_sent[0])
+        else:
+            LOG.info("ambient-enabled -> false, pausing")
+
+    settings.connect("changed::" + SETTINGS_KEY, on_ambient_changed)
+
+    def tick():
+        nonlocal current_step, smoothed, last_sample, yielded, yield_lux
+        if not ambient_on:
+            return GLib.SOURCE_CONTINUE
 
         now = time.monotonic()
         elapsed = now - last_sample
@@ -364,7 +392,7 @@ def main() -> int:
 
         lux = read_lux(sensor, scale)
         if lux is None:
-            continue
+            return GLib.SOURCE_CONTINUE
 
         if smoothed is None or elapsed > SUSPEND_GAP:
             smoothed = lux
@@ -392,9 +420,12 @@ def main() -> int:
         if yielded:
             if abs(smoothed - yield_lux) > RECLAIM_LUX:
                 yielded = False
-                LOG.info("ambient light changed by more than %.0f lux, taking control back", RECLAIM_LUX)
+                LOG.info(
+                    "ambient light changed by more than %.0f lux, taking control back",
+                    RECLAIM_LUX,
+                )
             else:
-                continue
+                return GLib.SOURCE_CONTINUE
 
         target_step = select_step(steps, current_step, smoothed)
         if target_step != current_step:
@@ -413,6 +444,16 @@ def main() -> int:
         if last_sent[0] is None or abs(target_percent - last_sent[0]) >= 1.0:
             start = last_sent[0] if last_sent[0] is not None else target_percent
             ramp(backlight, start, target_percent, last_sent)
+        return GLib.SOURCE_CONTINUE
+
+    def quit_loop(*_args):
+        loop.quit()
+        return GLib.SOURCE_REMOVE
+
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, quit_loop)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, quit_loop)
+    GLib.timeout_add(int(POLL_INTERVAL * 1000), tick)
+    loop.run()
 
     LOG.info("stopped")
     return 0

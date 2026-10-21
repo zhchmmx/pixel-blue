@@ -13,9 +13,10 @@ cp -avf "/ctx/system_files"/. /
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
 
-# D-Bus bindings used by the ALS auto-brightness daemon
-# (system_files/usr/bin/als-brightness-daemon.py writes through logind)
-dnf5 install -y python3-dbus
+# D-Bus bindings and GSettings (PyGObject) used by the ALS auto-brightness
+# daemon (system_files/usr/bin/als-brightness-daemon.py): logind for the
+# backlight, Gio.Settings for the ambient-enabled toggle
+dnf5 install -y python3-dbus python3-gobject-base
 
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
@@ -185,10 +186,12 @@ systemctl enable podman.socket
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
 
-# Watch the GNOME "Automatic Brightness" toggle and start/stop the ALS daemon
-# with it. ambient-enabled defaults to true, so auto brightness is on by
-# default; turning the toggle off stops the daemon.
-systemctl --global enable ambient-watch.service
+# The ALS daemon is a per-user resident service; it reads
+# org.gnome.settings-daemon.plugins.power ambient-enabled inline and pauses
+# when the toggle is off. Enabling it globally means it starts for every
+# login session, whether the toggle is on or off — daemon checks gsettings
+# each cycle and no-ops until the user turns it on.
+systemctl --global enable als-brightness.service
 
 
 # Clean up dnf cache to reduce image size

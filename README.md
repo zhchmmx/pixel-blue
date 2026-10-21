@@ -87,20 +87,17 @@ is active, GNOME's own auto-brightness is kept out of the way.
 
 ## Enabled by default
 
-`ambient-watch.service` is enabled for all users by default and follows
-GNOME's **Settings → Power → Automatic Brightness** toggle: with the toggle on,
-`als-brightness.service` runs; with it off, the daemon stops. Because the
-gsettings key defaults to true, automatic brightness is on out of the box.
-
-If you disabled the watcher earlier, enable it again with:
-
-``` bash
-systemctl --user enable --now ambient-watch.service
-```
+`als-brightness.service` is a per-user service enabled for all login sessions.
+It stays resident and subscribes to
+`org.gnome.settings-daemon.plugins.power ambient-enabled` through
+`Gio.Settings`, so it reacts to the toggle immediately instead of polling;
+when the toggle is off it simply pauses, when it is on it runs the curve.
+Because the gsettings key defaults to true, automatic brightness is on out of
+the box — no extra watcher process needed.
 
 ## Disable
 
-Stop the daemon but keep the watcher enabled (survives logins):
+Turn it off (survives logins):
 
 ``` bash
 gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false
@@ -109,8 +106,7 @@ gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false
 Or remove the feature entirely:
 
 ``` bash
-systemctl --user disable --now ambient-watch.service
-systemctl --user stop als-brightness.service
+systemctl --user disable --now als-brightness.service
 ```
 
 ## Tuning the curve
