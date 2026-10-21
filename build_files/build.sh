@@ -114,103 +114,12 @@ cp -r /tmp/alsa-ucm-conf-cros/overrides/* /usr/share/alsa/ucm2/conf.d/
 # 183101 and /1047364); GNOME default bindings are checked against the upstream
 # gsettings-desktop-schemas so keyd output avoids clashing with them. The final
 # mapping table is documented in README.md (Keyboard layout).
-
-mkdir -p /etc/keyd
-
-cat > /etc/keyd/cros.conf << 'EOF'
-[ids]
-# Pixelbook and Pixelbook Go use AT Keyboard (0001:0001)
-0001:0001
-
-# NOTE: keyd only honours full-line comments (first non-space character is '#').
-# Do not append trailing comments to bindings; keyd parses them as part of the
-# value and silently drops the binding (keyd check then fails).
-
-[main]
-# The eve top row is assumed to emit media codes (back, refresh, zoom, scale,
-# brightnessdown/brightnessup, playpause, mute, volumedown/volumeup, sleep),
-# matching the pre-existing config; confirm with `keyd monitor` (README caveat).
-# Only these three keys are remapped; the rest pass through as-is.
-# Fullscreen: bare KEY_ZOOM does nothing in GNOME, so map it to F11.
-zoom = f11
-# Overview key -> screenshot UI (GNOME hangs the screenshot UI off Print).
-scale = print
-# Three-lines/power key -> Quick Settings (GNOME 45+ native Super+S).
-sleep = M-s
-# Modifier->layer bindings are implicit in keyd; declared here for clarity.
-meta = layer(meta)
-control = layer(control)
-leftalt = layer(alt)
-# Right Alt behaves as plain Alt, as on ChromeOS (default is layer(altgr)).
-# Drop the next line if a real device shows right Alt does not trigger Alt combos.
-rightalt = layer(alt)
-shift = layer(shift)
-
-[meta]
-# Hold Search (Meta): top row = F1-F10 (official), plus ChromeOS navigation.
-# Bindings here drop Super, so outputs are plain keys or explicit-modifier
-# macros (M- = Super, C- = Ctrl, S- = Shift, A- = Alt).
-back = f1
-refresh = f2
-zoom = f3
-scale = f4
-brightnessdown = f5
-brightnessup = f6
-playpause = f7
-mute = f8
-volumedown = f9
-volumeup = f10
-# Search + three-lines -> F12.
-sleep = f12
-# Search + Alt -> Caps Lock (either order; the [alt] layer adds the other).
-leftalt = capslock
-# Search + Left/Right -> Home/End (bare, so it is not read as a Super combo).
-left = home
-right = end
-# Search + [ / ] -> previous / next workspace (GNOME native Super+Page_Up/Down).
-leftbrace = M-pageup
-rightbrace = M-pagedown
-
-[alt]
-# Alt combos; output drops Alt (ChromeOS semantics).
-# Alt + Search -> Caps Lock.
-leftmeta = capslock
-# Alt + Backspace -> forward Delete.
-backspace = delete
-# Alt + Up/Down -> Page Up/Down (no GNOME system binding; see README caveat).
-up = pageup
-down = pagedown
-brightnessdown = kbdillumdown
-brightnessup = kbdillumup
-
-# Composite layers must be declared after their constituent layers.
-[shift+meta]
-# Search + Shift + Left/Right -> select to line start / end.
-left = S-home
-right = S-end
-# Search + Shift + [ / ] -> move window to previous / next workspace.
-leftbrace = M-S-pageup
-rightbrace = M-S-pagedown
-
-[control+meta]
-# Search + Ctrl + Left/Right -> start / end of document.
-left = C-home
-right = C-end
-
-[control+alt]
-# Ctrl + Alt + Backspace -> Ctrl + Alt + Delete.
-backspace = C-A-delete
-EOF
-
-# udev hwdb: map the Pixelbook Assistant key (AT scancode 0xd8, confirmed via
-# evtest MSC_SCAN) to F13; bind it to any custom shortcut in
-# Settings -> Keyboard -> Custom Shortcuts. The Search/Launcher key is natively
-# leftmeta and needs no remapping.
-mkdir -p /etc/udev/hwdb.d
-cat > /etc/udev/hwdb.d/61-pixel-keyboard.hwdb << 'EOF'
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pn*:pvr*
- KEYBOARD_KEY_d8=f13
-EOF
+#
+# The keymap data lives in dedicated files under system_files/ and is installed
+# by the `cp -a /ctx/system_files` at the top of this script:
+#   system_files/etc/keyd/cros.conf                    -> /etc/keyd/cros.conf
+#   system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb -> Assistant key -> F13
+# Edit those files directly; validate with `sudo keyd check` on a device.
 
 # libinput quirks for keyd virtual keyboard
 mkdir -p /etc/libinput

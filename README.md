@@ -77,7 +77,8 @@ so these are reached with the **Search** and **Alt** keys, exactly the way
 ChromeOS does it. The combos follow the official Google shortcut list, and the
 keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
 (verified against upstream `gsettings-desktop-schemas`). The config lives in
-`build_files/build.sh`; this table is the human-readable reference.
+`system_files/etc/keyd/cros.conf` (plus `system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`
+for the Assistant key); this table is the human-readable reference.
 
 Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
 [Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
