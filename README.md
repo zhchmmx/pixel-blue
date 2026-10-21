@@ -97,7 +97,7 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
 | `Brightness −` / `+` | Brightness | native pass-through |
 | `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
-| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
+| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME default for `toggle-quick-settings`; gschema override lists `<Super>s` and `F12`) |
 
 ## Search (Meta) held
 
@@ -107,7 +107,7 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | Combo | Emits | Function |
 | --- | --- | --- |
 | `Search` + `Back`…`Vol +` | `F1`–`F10` | the official top-row F-keys |
-| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key) |
+| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key); gschema also binds `F12` to Quick Settings |
 | `Search` + `←` / `→` | bare `Home` / `End` | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
 | `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End` | select to line start / end |
 | `Search` + `Ctrl` + `←` / `→` | `Ctrl+Home` / `Ctrl+End` | start / end of document |
@@ -135,8 +135,10 @@ the owner chose to keep those app shortcuts instead.
 
 - `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
 - **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
-  hwdb to `F13`. `F13` has no GNOME default, so bind it to any custom shortcut in
-  Settings → Keyboard → Custom Shortcuts.
+  hwdb to `F13`. On some distros GNOME's `control-center-static` (launch Settings)
+  is bound to `F13`, so the Assistant key may open Settings; this is left as-is
+  for now. Bind `F13` to a custom shortcut in Settings → Keyboard → Custom
+  Shortcuts if desired.
 - `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
 
 ## Caveats & not-mapped items
@@ -144,9 +146,10 @@ the owner chose to keep those app shortcuts instead.
 - **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
   opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
   straight to the screenshot UI and does not keep the original key.
-- **Right Alt**: mapped to behave as a plain `Alt` so the `Alt` combos work with either
-  Alt. If a real ChromeOS device shows right Alt does *not* trigger Alt combos, remove
-  `rightalt = layer(alt)`.
+- **Right Alt**: kept as keyd's default (`rightalt = layer(altgr)`), so it emits
+  `RIGHTALT` (not `LEFTALT`). An `[altgr]` layer mirrors the `[alt]` layer so
+  right-Alt combos (`Alt+Backspace`, `Alt+brightness`, `Alt+Search`) behave
+  identically to left-Alt ones, matching ChromeOS.
 - **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
   touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
   combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
@@ -156,7 +159,9 @@ the owner chose to keep those app shortcuts instead.
   config assumes. Some firmware/distro states report the top row as `f1`–`f10` instead;
   if `keyd monitor` shows that, the left-hand key names above (`zoom`, `scale`, `sleep`,
   and the `back`…`volumeup` list under Search) must be rewritten to the `f1`–`f13` codes.
-  The Three-lines key is likewise assumed to arrive as `sleep`.
+  The Three-lines key is likewise assumed to arrive as `sleep`; it is emitted as
+  `Super+S` (GNOME's default `toggle-quick-settings` binding). `Search`+`Three-lines`
+  emits `F12`, which the same gschema override also binds to Quick Settings.
 
 # Modifications to the Upstream
 
