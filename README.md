@@ -69,6 +69,95 @@ network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
 
 
+# Keyboard Layout (ChromeOS-style)
+
+The Pixelbook keyboard has no Home/End, Page Up/Down, forward Delete, Caps Lock
+or dedicated F1–F12 keys. The image uses [keyd](https://github.com/rvaiya/keyd)
+so these are reached with the **Search** and **Alt** keys, exactly the way
+ChromeOS does it — with one deliberate exception: the page keys (`Alt+↑/↓`)
+are left unmapped so apps keep them (see **Alt held**). The combos follow
+the official Google shortcut list, and the
+keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
+(verified against upstream `gsettings-desktop-schemas`). The config lives in
+`system_files/etc/keyd/cros.conf` (plus `system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`
+for the Assistant key); this table is the human-readable reference.
+
+Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
+[Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
+GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybindings`.
+
+## Top row (bare press)
+
+| Physical key | ChromeOS role | Emits on Pixel Blue |
+| --- | --- | --- |
+| `Esc` | Cancel | `Esc` (native) |
+| `Back` | Back | `Back` (native media key) |
+| `Refresh` | Forward | `Refresh` (native media key) |
+| `Fullscreen` (`zoom`) | Fullscreen | `F11` (bare `KEY_ZOOM` does nothing in GNOME) |
+| `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
+| `Brightness −` / `+` | Brightness | native pass-through |
+| `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
+| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
+
+## Search (Meta) held
+
+`Search` is natively `Meta`, so its own combos (`Search` alone, `Search+L` lock,
+`Search+A`, `Search+V` …) are GNOME-native and left untouched.
+
+| Combo | Emits | Function |
+| --- | --- | --- |
+| `Search` + `Back`…`Vol +` | `F1`–`F10` | the official top-row F-keys |
+| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key) |
+| `Search` + `←` / `→` | bare `Home` / `End` | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
+| `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End` | select to line start / end |
+| `Search` + `Ctrl` + `←` / `→` | `Ctrl+Home` / `Ctrl+End` | start / end of document |
+| `Search` + `[` / `]` | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace |
+| `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down` | move window to previous / next workspace |
+| `Search` + `Alt` | `Caps Lock` | Caps Lock (either order) |
+
+## Alt held
+
+| Combo | Emits | Function |
+| --- | --- | --- |
+| `Alt` + `Backspace` | `Delete` | forward delete |
+| `Alt` + `Search` | `Caps Lock` | Caps Lock |
+| `Alt` + `Brightness −` / `+` | keyboard backlight | native pass-through |
+
+`Ctrl+Alt+↑/↓` and `Ctrl+Alt+←/→` are **not** remapped — GNOME binds them to workspace
+switching, and the owner chose to keep that. Bare `Alt+←/→` is likewise left untouched
+(apps use it for back/forward), since ChromeOS does not use it for text navigation.
+The official ChromeOS page keys, `Alt+↑/↓`, are deliberately **not** mapped either:
+keyd sits below the app layer, so binding them globally would cost GNOME Files its
+parent-folder shortcut (`Alt+↑`) and editors their move-line bindings (`Alt+↑/↓`) —
+the owner chose to keep those app shortcuts instead.
+
+## Function keys & the Assistant key
+
+- `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
+- **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
+  hwdb to `F13`. `F13` has no GNOME default, so bind it to any custom shortcut in
+  Settings → Keyboard → Custom Shortcuts.
+- `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
+
+## Caveats & not-mapped items
+
+- **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
+  opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
+  straight to the screenshot UI and does not keep the original key.
+- **Right Alt**: mapped to behave as a plain `Alt` so the `Alt` combos work with either
+  Alt. If a real ChromeOS device shows right Alt does *not* trigger Alt combos, remove
+  `rightalt = layer(alt)`.
+- **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
+  touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
+  combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
+- **Device-verify before trusting**: run `sudo keyd check` after editing, and use
+  `keyd monitor` to confirm (a) the Assistant key really reports scancode `0xd8`, and
+  (b) the top row arrives as media codes (`back`, `zoom`, `scale`, `sleep`, …) as this
+  config assumes. Some firmware/distro states report the top row as `f1`–`f10` instead;
+  if `keyd monitor` shows that, the left-hand key names above (`zoom`, `scale`, `sleep`,
+  and the `back`…`volumeup` list under Search) must be rewritten to the `f1`–`f13` codes.
+  The Three-lines key is likewise assumed to arrive as `sleep`.
+
 # Modifications to the Upstream
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
