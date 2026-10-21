@@ -1,7 +1,0 @@
-# Hide the ambient light sensor from iio-sensor-proxy.
-# GNOME's built-in auto-brightness (gnome-settings-daemon) reacts to ALS
-# changes too quickly and would fight the Pixel Blue ALS daemon for backlight
-# control. With the sensor hidden, gsd never adjusts brightness; the daemon
-# (which reads the IIO device directly) becomes the only ambient-based
-# controller and is driven by the GNOME toggle via ambient-watch.service.
-SUBSYSTEM=="iio", TEST=="in_illuminance_input", ENV{IIO_SENSOR_PROXY_TYPE}=""

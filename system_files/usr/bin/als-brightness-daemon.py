@@ -3,9 +3,10 @@
 
 This daemon reproduces the ChromeOS powerd behaviour on the Pixelbook (eve):
 
-  * read the ambient light sensor straight from IIO sysfs (the ALS is hidden
-    from iio-sensor-proxy by 99-hide-als.rules so gnome-settings-daemon cannot
-    fight us for the backlight),
+  * read the ambient light sensor straight from IIO sysfs (the sensor stays
+    visible to iio-sensor-proxy so GNOME keeps showing its auto-brightness
+    switch, but a D-Bus policy blocks gnome-settings-daemon from claiming it
+    and fighting us for the backlight),
   * smooth the raw lux readings with an exponential moving average,
   * pick one of the seven eve brightness steps, using the vendor's down/up
     lux thresholds as hysteresis,
