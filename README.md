@@ -187,7 +187,7 @@ the owner chose to keep those app shortcuts instead.
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
-- Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware decoding. AAC and HEVC (8/10-bit) decode is accelerated on the Pixelbook's Kaby Lake iGPU via `intel-media-driver` (iHD, swapped in from RPM Fusion nonfree); check it with `vainfo`.
+- Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
