@@ -46,6 +46,7 @@ ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
 # or rpm-ostree/bootc layering.
 
 dnf5 remove -y firefox firefox-langpacks
+dnf5 remove -y gnome-shell-extension-background-logo
 
 ### Audio configuration for Pixelbook (eve)
 #
@@ -109,64 +110,23 @@ cp -r /tmp/alsa-ucm-conf-cros/overrides/* /usr/share/alsa/ucm2/conf.d/
 
 ### Keyboard configuration for Pixelbook (eve)
 #
-# Uses keyd to remap the top-row function keys.
-# Source: https://github.com/WeirdTreeThing/cros-keyboard-map
-
-mkdir -p /etc/keyd
-
-cat > /etc/keyd/cros.conf << 'EOF'
-[ids]
-# Pixelbook and Pixelbook Go use AT Keyboard (0001:0001)
-0001:0001
-
-[main]
-# Pixelbook (eve) top-row keys natively emit media keys, not F1-F10:
-#   esc, back, refresh, zoom, scale, brightnessdown, brightnessup,
-#   playpause, mute, volumedown, volumeup, sleep
-# No remapping is needed in the main layer; they pass through as-is.
+# Uses keyd to emulate the ChromeOS key layout. Combos are derived from the
+# official Google ChromeOS shortcut docs (support.google.com/chromebook/answer/
+# 183101 and /1047364); GNOME default bindings are checked against the upstream
+# gsettings-desktop-schemas so keyd output avoids clashing with them. The final
+# mapping table is documented in README.md (Keyboard layout).
 #
-# keyd auto-binds modifier keys to their eponymous layers, but the
-# bindings are declared explicitly here for clarity.
-zoom = f11
-sleep = f12
-meta = layer(meta)
-control = layer(control)
-leftalt = layer(alt)
-rightalt = layer(altgr)
-shift = layer(shift)
+# The keymap data lives in dedicated files under system_files/ and is installed
+# by the `cp -a /ctx/system_files` at the top of this script:
+#   system_files/etc/keyd/cros.conf                    -> /etc/keyd/cros.conf
+#   system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb -> Three-lines key -> dashboard, Assistant key -> F23
+# Edit those files directly; validate with `sudo keyd check` on a device.
 
-[meta]
-# Hold Meta (Search) to use the top-row keys as F1-F10.
-back = f1
-refresh = f2
-zoom = f3
-scale = f4
-brightnessdown = f5
-brightnessup = f6
-playpause = f7
-mute = f8
-volumedown = f9
-volumeup = f10
-sleep = f13
-
-[alt]
-backspace = delete
-brightnessdown = kbdillumdown
-brightnessup = kbdillumup
-
-[control]
-brightnessdown = print
-
-[control+alt]
-backspace = C-A-delete
-EOF
-
-# udev hwdb: remap the top-row key (scan code d8) to leftmeta (search key)
-mkdir -p /etc/udev/hwdb.d
-cat > /etc/udev/hwdb.d/61-pixel-keyboard.hwdb << 'EOF'
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pn*:pvr*
- KEYBOARD_KEY_d8=leftmeta
-EOF
+# Compile the hwdb sources into the binary database udev reads at runtime
+# (hwdb(7): only the compiled database is used). At build time /usr/lib is
+# still writable, so ship the database inside the image like the immutable-image
+# setup systemd documents; nothing else in the build runs systemd-hwdb.
+systemd-hwdb update --usr
 
 # libinput quirks for keyd virtual keyboard
 mkdir -p /etc/libinput
@@ -182,6 +142,18 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
+### GNOME Shell default dash favorites
+#
+# Pin the default apps shown on the GNOME Shell dash. The list is provided as a
+# gschema override in system_files/usr/share/glib-2.0/schemas/, which the
+# "cp -avf /ctx/system_files/. /" at the top of this script places in
+# /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to
+# take effect, so do it after all package operations.
+#
+# Note: this only changes the default for users who never customized their own
+# favorites; it does not override a user's existing dconf value.
+
+glib-compile-schemas /usr/share/glib-2.0/schemas
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
