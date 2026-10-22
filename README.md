@@ -135,8 +135,10 @@ the owner chose to keep those app shortcuts instead.
 
 - `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
 - **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
-  hwdb to `F13`. `F13` has no GNOME default, so bind it to any custom shortcut in
-  Settings → Keyboard → Custom Shortcuts.
+  hwdb to `F13`. On some distros GNOME's `control-center-static` (launch Settings)
+  is bound to `F13`, so the Assistant key may open Settings; this is left as-is
+  for now. Bind `F13` to a custom shortcut in Settings → Keyboard → Custom
+  Shortcuts if desired.
 - `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
 
 ## Caveats & not-mapped items
@@ -144,9 +146,10 @@ the owner chose to keep those app shortcuts instead.
 - **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
   opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
   straight to the screenshot UI and does not keep the original key.
-- **Right Alt**: mapped to behave as a plain `Alt` so the `Alt` combos work with either
-  Alt. If a real ChromeOS device shows right Alt does *not* trigger Alt combos, remove
-  `rightalt = layer(alt)`.
+- **Right Alt**: kept as keyd's default (`rightalt = layer(altgr)`), so it emits
+  `RIGHTALT` (not `LEFTALT`). An `[altgr]` layer mirrors the `[alt]` layer so
+  right-Alt combos (`Alt+Backspace`, `Alt+brightness`, `Alt+Search`) behave
+  identically to left-Alt ones, matching ChromeOS.
 - **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
   touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
   combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
