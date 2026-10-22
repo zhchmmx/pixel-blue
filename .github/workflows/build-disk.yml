@@ -136,6 +136,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Transcode image layers to gzip for umoci
+        run: |
+          set -euo pipefail
+          # build.yml publishes the GHCR layers as zstd (#65), but this ISO
+          # build unpacks the image with umoci, which only understands tar
+          # and tar+gzip blobs and aborts on the OCI tar+zstd mediatype.
+          # Re-publish the image into a local OCI store recompressed to gzip
+          # and pass it to the action via image_src (the action's host-side
+          # Flatpak dependency step unpacks the same image with umoci too).
+          # /github/workspace is where the action bind-mounts the workspace,
+          # so symlink it on the host as well and keep the store inside the
+          # workspace: the same absolute path then resolves both on the host
+          # and inside the action container.
+          sudo mkdir -p /github
+          sudo ln -sfn "$GITHUB_WORKSPACE" /github/workspace
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          skopeo copy --dest-compress --dest-compress-format gzip \
+            "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            "oci:/github/workspace/image-gzip:${DEFAULT_TAG}"
+
       - name: Resolve Fedora version
         id: version
         run: |
@@ -163,6 +184,8 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}
           image_repo: ${{ env.IMAGE_REGISTRY }}
           image_tag: ${{ env.DEFAULT_TAG }}
+          # gzip-recompressed copy of the registry image (see transcode step)
+          image_src: oci:/github/workspace/image-gzip:${{ env.DEFAULT_TAG }}
           version: ${{ env.FEDORA_VERSION }}
           variant: Silverblue
           iso_name: build/pixel-blue.iso
