@@ -18,6 +18,7 @@ on:
     branches:
       - main
     paths:
+      - 'build_files/installer-branding.tmpl'
       - 'disk_config/disk.toml'
       - 'disk_config/install_branding.tmpl'
       - 'flatpak_refs/**'
@@ -110,6 +111,9 @@ jobs:
   # variant=Silverblue selects Anaconda's fedora-silverblue profile: the
   # installer only asks for the destination, and account/timezone setup
   # happens in gnome-initial-setup on first boot, like the official Fedora ISO.
+  # build_files/installer-branding.tmpl (passed as additional_templates)
+  # overwrites the installer's own sidebar logo, which comes from the
+  # installer environment's fedora-logos, not from our container image.
   build-iso:
     name: Build anaconda ISO
     runs-on: ubuntu-24.04
@@ -190,13 +194,15 @@ jobs:
           version: ${{ env.FEDORA_VERSION }}
           variant: Silverblue
           iso_name: build/pixel-blue.iso
-          # Lorax template run inside the installer environment build
-          # (issue #56): rebrands os-release and .buildstamp to "Pixel
-          # Blue". The action passes it verbatim to lorax --add-template,
-          # so it must be the path of the repo file inside its container,
-          # where the workspace is mounted at /github/workspace. Keep in
-          # sync with the just build-iso recipe.
-          additional_templates: /github/workspace/disk_config/install_branding.tmpl
+          # Lorax templates run inside the installer environment build,
+          # passed space-delimited (the action forwards each entry as its
+          # own lorax --add-template arg): disk_config/install_branding.tmpl
+          # rebrands os-release and .buildstamp (issue #56), and
+          # build_files/installer-branding.tmpl overwrites the Anaconda
+          # sidebar logo (issue #54). The action passes the paths verbatim
+          # into its container, where the workspace is mounted at
+          # /github/workspace. Keep in sync with the just build-iso recipe.
+          additional_templates: /github/workspace/disk_config/install_branding.tmpl /github/workspace/build_files/installer-branding.tmpl
           # Default Flatpak applications, one ref per file in flatpak_refs/.
           # Pulled from Flathub at build time and embedded in the ISO.
           flatpak_remote_name: flathub

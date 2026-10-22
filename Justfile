@@ -356,6 +356,12 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 #   - uses Anaconda's fedora-silverblue profile (VARIANT=Silverblue): the
 #     installer only asks for the destination, and account/timezone setup
 #     happens in gnome-initial-setup on first boot, like the official Fedora ISO
+#   - brands the installer environment itself via two lorax templates passed
+#     to ADDITIONAL_TEMPLATES space-delimited:
+#     disk_config/install_branding.tmpl (os-release + .buildstamp) and
+#     build_files/installer-branding.tmpl (the sidebar logo). The repo is
+#     mounted at /github/workspace, so the templates and their source PNG
+#     are addressed by their in-container paths
 #
 # Keep the jasonn3 image tag in sync with the SHA pinned for
 # jasonn3/build-container-installer in .github/workflows/build-disk.yml.
@@ -383,7 +389,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="4
       IMAGE_TAG="{{ tag }}" \
       VERSION="{{ version }}" \
       VARIANT="Silverblue" \
-      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl" \
+      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl /github/workspace/build_files/installer-branding.tmpl" \
       FLATPAK_REMOTE_NAME="flathub" \
       FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
       FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \

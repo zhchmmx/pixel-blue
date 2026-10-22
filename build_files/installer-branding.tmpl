@@ -1,0 +1,25 @@
+# Pixel Blue installer-environment branding (lorax runtime template).
+#
+# Passed to lorax via jasonn3/build-container-installer's
+# ADDITIONAL_TEMPLATES (wired in .github/workflows/build-disk.yml and the
+# Justfile build-iso recipe). The container mounts the repo checkout at
+# /github/workspace, so that prefix is baked in below.
+#
+# Anaconda paints the product logo onto the installer sidebar through GTK
+# CSS, so there is no file here to patch; instead the PNG slots that
+# fedora-logos installs into the runtime tree are replaced outright. Both
+# paths are overwritten: the generic /usr/share/anaconda/pixmaps/
+# sidebar-logo.png and the silverblue variant that the fedora-silverblue
+# profile's stylesheet actually selects. The image is the white symbol (the
+# sidebar renders over blue), regenerated from the SVG master by
+# build_files/export-logos.sh.
+#
+# runcmd is the only template command that can read from outside the
+# runtime tree: install's SRC is joined onto the inroot and stays inside
+# it. runcmd takes complete absolute paths, with ${root} (the runtime tree
+# at this stage) as the destination prefix. No '-' error-suppression
+# prefix on these lines: a missing source or destination parent must fail
+# the ISO build loudly instead of silently shipping a Fedora-branded
+# installer.
+runcmd /usr/bin/install -Dm 644 /github/workspace/system_files/usr/share/anaconda/pixmaps/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/sidebar-logo.png
+runcmd /usr/bin/install -Dm 644 /github/workspace/system_files/usr/share/anaconda/pixmaps/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/silverblue/sidebar-logo.png

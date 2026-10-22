@@ -219,6 +219,72 @@ systemctl --global enable wacom-stylus-keyfile.service
 systemctl --global enable als-brightness.service
 
 
+### Branding
+#
+# Replace the inherited Fedora logo (issue #54). The logo master lives at
+# system_files/usr/share/pixel-blue/logos/ and the same artwork is installed
+# as a hicolor scalable icon (pixel-blue-logo-icon.svg) by the cp at the top
+# of this script. Point os-release's LOGO= at it so GNOME surfaces that
+# render the distribution logo (Settings -> About, Overview, GNOME Software)
+# pick up Pixel Blue artwork instead of the Fedora ring. Only the LOGO key
+# is rewritten here: NAME/PRETTY_NAME are rebranded by the #56 section at
+# the end of this script, and ID=fedora and the VARIANT* keys stay
+# untouched (Flatpak / GNOME Software detection and the Anaconda
+# Silverblue ISO profile depend on them).
+
+if grep -q '^LOGO=' /usr/lib/os-release; then
+  sed -i 's|^LOGO=.*|LOGO=pixel-blue-logo-icon|' /usr/lib/os-release
+else
+  echo 'LOGO=pixel-blue-logo-icon' >> /usr/lib/os-release
+fi
+
+# Boot splash (phase 2): plymouth renders the system default theme's
+# watermark from the initramfs, and it only reads PNGs. Fedora's default
+# theme is "spinner" and its only distro artwork is watermark.png, so we
+# overlay a white mono PNG export of the symbol master there instead of
+# adding a custom theme (no plymouth-set-default-theme change needed).
+# Re-apply after the dnf5 transactions in case a package refresh restored
+# the Fedora copies of these paths.
+cp -avf "/ctx/system_files/usr/share/plymouth/." /usr/share/plymouth/
+cp -avf "/ctx/system_files/usr/share/icons/hicolor/." /usr/share/icons/hicolor/
+cp -avf "/ctx/system_files/usr/share/pixmaps/." /usr/share/pixmaps/
+
+# Files copied outside the rpm transaction are invisible to the packaged
+# icon-theme.cache, which would keep LOGO= resolving to the old entries;
+# rebuild it (gtk-update-icon-cache is a hard dep of gtk3 on the base).
+gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
+
+# bootc ships the image's initramfs verbatim at deploy time (nothing is
+# regenerated on the target), so re-run dracut here to bake the overlaid
+# spinner/watermark.png into the boot splash (per
+# docs.fedoraproject.org/en-US/bootc/initramfs/). --no-hostonly keeps the
+# initrd generic (hardware detection inside the build container would
+# otherwise bake in the CI runner's devices).
+dracut --no-hostonly --regenerate-all --force
+# Assert it landed. dracut's plymouth module bakes in only the *selected*
+# default theme, so this also proves spinner is that theme; if either ever
+# regresses, the build fails loudly instead of booting a Fedora splash.
+splash_baked=0
+for img in /usr/lib/modules/*/initramfs.img /usr/lib/modules/*/images/pxeboot/initramfs.img; do
+  [ -f "$img" ] || continue
+  # Capture before matching: grep -q closing the pipe early would SIGPIPE
+  # lsinitrd and pipefail would report failure for a perfectly good initrd.
+  if lsinitrd "$img" > /tmp/lsinitrd.list 2>/dev/null &&
+     grep -q 'themes/spinner/watermark.png' /tmp/lsinitrd.list; then
+    splash_baked=1
+  fi
+done
+if [ "$splash_baked" -ne 1 ]; then
+  echo "error: pixel-blue plymouth watermark not found in any regenerated initramfs" >&2
+  exit 1
+fi
+
+# First-boot wizard: current gnome-initial-setup (GTK4 rewrite) ships no
+# vendor logo path in its conf (README documents only the [pages] group:
+# skip / new_user_only / existing_user_only), so there is nothing to wire
+# here. The wizard's title string comes from PRETTY_NAME, rebranded to
+# Pixel Blue by the #56 section at the end of this script.
+
 # Clean up dnf cache to reduce image size
 dnf5 clean all
 
