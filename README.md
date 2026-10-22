@@ -197,14 +197,45 @@ the owner chose to keep those app shortcuts instead.
 
 Pixel Blue runs on the [MrChromebox](https://mrchromebox.org/) UEFI Full ROM, whose releases are **not** published on LVFS — `fwupdmgr` cannot see them. This image therefore ships its own update channel:
 
-- A weekly systemd timer (`firmware-update-check.timer`) runs `/usr/libexec/firmware-update-check.sh`, which parses the upstream `sources.sh`, compares the published release date with the installed BIOS release date (`/sys/class/dmi/id/bios_date`), and — when a newer release exists — downloads the ROM (plus its upstream `.sha1`), verifies the checksum and publishes local fwupd metadata at `/var/lib/pixel-blue/fwupd/firmware.xml.gz`.
+- A weekly systemd timer (`firmware-update-check.timer`) runs `/usr/libexec/firmware-update-check.sh`, which parses the upstream `sources.sh`, compares the published release date with the installed BIOS release date (`/sys/class/dmi/id/bios_date`), and — when a newer release exists — downloads the ROM (plus its upstream `.sha1`), verifies the checksum and publishes local fwupd metadata at `/var/lib/pixel-blue/fwupd/firmware.xml.gz`. Superseded dated ROMs (~16 MB each) are removed automatically; only the currently published ROM and `backup.rom` are kept.
 - A local fwupd remote (`pixel-blue-mrchromebox`) plus the bundled `mrchromebox` plugin make GNOME Software show an **Update** button for the device "MrChromebox UEFI Full ROM". Clicking it flashes the new firmware with `flashrom` as root: the software write-protect is cleared automatically (the hardware write-protect must already be off, which is required to install this image in the first place), the current flash is backed up to `/var/lib/pixel-blue/fwupd/backup.rom`, and the write is held with a `systemd-inhibit` lock. A reboot is required afterwards to boot the new firmware.
 
-If an update fails you will see a critical notification **"固件更新失败——千万不要重启电脑"**: do not shut down or reboot — go back to the GNOME Software Updates page and click Update again to retry (the metadata and ROM stay local, so retrying does not need the network). The notification repeats every 5 minutes until the retry succeeds. If you want to stop the notifications manually:
+## When an update fails: class A vs class B
+
+Once an install transaction starts, the plugin keeps a marker at `/var/lib/pixel-blue/fwupd/flash-failed` (`class=A|B`, `state=inprogress|failed`, `attempts=N`): it is opened as `state=inprogress` by the plugin's `prepare` hook, flipped to `state=failed` by every failure path (including one the engine aborts before the write ever begins), and deleted by success. The user-level `pixel-blue-flash-alert` units turn it into a critical desktop notification that repeats every 5 minutes until a retry succeeds. The wording — both in the notification and in the GNOME Software error — is graded by class, because the two cases demand the opposite behaviour:
+
+- **class A — the flash was never touched.** The write had not started yet (preflight, write-protect, power, backup or staging failed, or the daemon aborted before writing). Rebooting or shutting down is completely safe; the notification says so. Just click **Update** again (the metadata and ROM stay local, so retrying does not need the network).
+- **class B — the write started or was interrupted mid-write.** The flash content may be incomplete and *restarting now can leave the machine unbootable*. Do not reboot; click **Update** again to retry. While a class B alert is live the notifier also holds a `systemd-inhibit --what=shutdown:sleep --mode=block` lock, so the normal "Power off / Restart" menu entries hit the standard *"an app is blocking shutdown"* dialog instead of silently rebooting into a brick; bypassing that is an explicit, authenticated override. class A alerts never block shutdown.
+
+The notification carries an **打开更新页** (open updates page) action that jumps straight to the GNOME Software Updates view, and a stale `state=inprogress` marker (the fwupd daemon died without running any error path) is reported the same way, graded by its class. Failures that GNOME Software rejects before the transaction ever reaches the plugin (a download or checksum error, "no update available") leave no marker and none is needed — they cannot touch the flash, and the in-app error is the whole story. If you want to stop the notifications manually:
 
 ``` bash
 sudo rm /var/lib/pixel-blue/fwupd/flash-failed
 ```
+
+## "Cancel" does not stop a flash in progress
+
+The fwupd plugin API exposes no cancellation hook to the code that is flashing — GNOME Software's *Cancel* cannot interrupt `flashrom -w`/`-v` halfway through, and the write runs to completion and is verified either way. If you do press Cancel, treat the machine exactly like a class B failure: keep it powered on, let the write finish (about a minute), then retry or re-check with `fwupdmgr get-devices`. Never pull power during the write regardless of what the UI says.
+
+## Worst case: power lost during a write
+
+Before every write the plugin backs up your current flash to `/var/lib/pixel-blue/fwupd/backup.rom`. If power is lost mid-write (or the machine otherwise ends up with an incomplete flash), it may not show anything on boot — the OS is then unreachable and no software on the machine itself can rewrite the SPI chip. Recovery is hardware work:
+
+1. Get the correct image out-of-band: either `backup.rom` (the known-good firmware from before the failed update) or the same-version `.rom` from <https://www.mrchromebox.tech/files/firmware/full_rom/>. The Pixelbook's SSD can be read from any Linux machine if the laptop itself won't boot.
+2. From a second computer, reflash the SPI chip directly with a SOIC-8 test clip on the board's flash chip and a USB SPI programmer (e.g. CH341A): `sudo flashrom -p ch341a_spi -w backup.rom`. The clip needs stable 3.3 V — power the laptop through its charger or use a powered clip adapter; the official [coreboot flashrom guide](https://www.coreboot.org/Flashrom) and MrChromebox's bricking-recovery notes cover the wiring.
+3. After a successful rewrite the old firmware boots again; reinstall the update with AC power connected, or via `sudo firmware-util.sh` if you prefer the upstream tool.
+
+Everything before this point is deliberately stacked against it: the write is gated on AC power or ≥50% battery, runs under a `systemd-inhibit` shutdown/sleep block, and a class B failure re-blocks shutdown from the user session until the retry succeeds.
+
+## Why the image does not pin fwupd or flashrom
+
+The base (`fedora-silverblue:latest`) owns the `fwupd` and `flashrom` RPMs; pinning either would freeze firmware tooling against security updates and break the bootc update model. The one fragile assumption — the hand-mirrored `FuPluginClass` layout in `plugin/mrchromebox/mrchromebox-plugin.h` — is instead guarded three ways:
+
+- **build time**: `build_files/build.sh` refuses to build if the installed `fwupd` is below 2.1.1 (or `flashrom` below 1.2), fetches the real `fu-plugin.h` for the exact installed fwupd version and fails when the mirrored struct is no longer a field-order prefix of it (a field inserted in the middle would shift vfunc offsets while everything still compiles);
+- **load time**: `fu_plugin_startup()` queries the running daemon's class size and refuses to register the device if it is smaller than the layout the plugin was built against;
+- **runtime**: a mid-flash daemon death can no longer be silent — the `state=inprogress` sentinel is picked up by the alert units described above.
+
+When a base update trips the build-time guard, the fix is to re-check the upstream header and mirror the new field order in the shim (append-only changes pass automatically).
 
 Manual flashing is still possible at any time with the official tool:
 

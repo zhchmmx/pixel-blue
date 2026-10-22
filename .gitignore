@@ -6,5 +6,8 @@ _build-*/**
 *_chunkah_*
 *_rpm-ostree_*
 
+# Python bytecode (system_files/usr/libexec/*.py dev testing)
+__pycache__/
+
 # AI Agents
 .workbuddy
