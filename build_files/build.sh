@@ -201,7 +201,9 @@ EOF
 # runtime by system_files/usr/libexec/firmware-update-check.sh, driven by
 # firmware-update-check.timer.  The plugin source lives in plugin/ and is
 # compiled here against the fwupd-devel that exactly matches the installed
-# daemon, so there is no ABI drift.
+# daemon; the one hand-mirrored struct (FuPluginClass) is validated against
+# the real upstream source of that exact version below, so nothing needs to
+# be version-pinned.
 
 # Runtime packages: fwupd (daemon + fwupdmgr), flashrom (flashing), curl
 # (full binary; the base image only ships curl-minimal).
@@ -213,13 +215,68 @@ dnf5 install -y fwupd flashrom curl
 # The plugin is compiled directly with gcc.  Fedora's fwupd-devel does not
 # ship the fwupdplugin headers or a fwupdplugin.pc file, so the plugin
 # declares the small API surface it uses itself in
-# plugin/mrchromebox/mrchromebox-plugin.h (FuPluginClass layout verified
-# ABI-identical across fwupd 2.0.10-2.1.8; symbol API targets fwupd 2.1.x,
-# matching this image's fwupd 2.1.8); everything else comes from <fwupd.h>.
+# plugin/mrchromebox/mrchromebox-plugin.h.  Because nothing here is version
+# pinned (the base image owns fwupd and must keep taking security updates),
+# the ABI assumption is guarded mechanically instead - see the layout check
+# below and the runtime class-size gate in fu_plugin_startup().
 # The module must be named "libfu_plugin_<name>.so" for the daemon to load
 # it, and it has to live in ${libdir}/fwupd-<fwupd-version> (the daemon's
 # FU_PATH_KIND_LIBDIR_PKG).
 dnf5 install -y fwupd-devel gcc glib2-devel pkgconf-pkg-config
+FWUPD_VER="$(rpm -q fwupd --qf '%{VERSION}')"
+FLASHROM_VER="$(rpm -q flashrom --qf '%{VERSION}')"
+
+# Floor assertions: fu_plugin_add_device only exists from fwupd 2.1.1
+# (2.0.x exported fu_plugin_device_add and the dlopen would die on the
+# undefined symbol); the flashrom output/option strings the plugin parses
+# were verified against flashrom 1.x.
+ver_ge() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]; }
+if ! ver_ge "$FWUPD_VER" 2.1.1; then
+	echo "error: fwupd $FWUPD_VER < 2.1.1; fu_plugin_add_device is missing" >&2
+	exit 1
+fi
+if ! ver_ge "$FLASHROM_VER" 1.2; then
+	echo "error: flashrom $FLASHROM_VER < 1.2; the plugin parses flashrom 1.x output" >&2
+	exit 1
+fi
+
+# FuPluginClass prefix guard: fetch the real fu-plugin.h of the EXACT
+# installed fwupd and require the hand-mirrored struct to be a field-order
+# prefix of the upstream one.  Appending fields at the END is ABI-safe for
+# us (fu_plugin_init_vfuncs only fills the mirrored slots); a field inserted
+# in the MIDDLE shifts every later vfunc offset while the plugin still
+# compiles cleanly - the daemon would then call write_firmware at the wrong
+# slot and segfault mid-flash, so the build must fail instead.
+curl -sfL --max-time 30 \
+	"https://raw.githubusercontent.com/fwupd/fwupd/${FWUPD_VER}/libfwupdplugin/fu-plugin.h" \
+	-o /tmp/fu-plugin.h
+python3 - "$FWUPD_VER" <<'PYEOF'
+import re
+import sys
+
+
+def fields(path):
+    src = open(path, encoding="utf-8").read()
+    m = re.search(r"struct _FuPluginClass \{(.*?)\n\};", src, re.S)
+    if m is None:
+        sys.exit(f"cannot find struct _FuPluginClass in {path}")
+    body = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S)
+    return ["parent_class"] + re.findall(r"\(\*([A-Za-z_0-9]+)\)\s*\(", body)
+
+
+shim = fields("/ctx/plugin/mrchromebox/mrchromebox-plugin.h")
+real = fields("/tmp/fu-plugin.h")
+if real[: len(shim)] != shim:
+    sys.exit(
+        "FuPluginClass layout drift vs fwupd %s: mirrored prefix %s is no "
+        "longer a field-order prefix of upstream %s; update "
+        "plugin/mrchromebox/mrchromebox-plugin.h before shipping" % (sys.argv[1], shim, real)
+    )
+print(
+    "mrchromebox: FuPluginClass shim (%d fields) verified against upstream "
+    "fwupd %s (%d fields)" % (len(shim), sys.argv[1], len(real))
+)
+PYEOF
 FWUPD_PLUGIN_DIR="$(pkg-config --variable=libdir fwupd)/fwupd-$(rpm -q fwupd --qf '%{VERSION}')"
 # pkg-config prints all flags on ONE line, so split words with read -r -a;
 # mapfile would split by lines and collapse every -I/-D into one argument.
