@@ -1,12 +1,2 @@
 [org.gnome.shell]
 favorite-apps=['org.gnome.Epiphany.desktop', 'org.gnome.Calendar.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Software.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.Calculator.desktop']
-
-# Map the Pixelbook three-lines (power) key to GNOME Quick Settings.
-# keyd emits Super+S (M-s) for that key (see /etc/keyd/cros.conf). GNOME's
-# upstream default for toggle-quick-settings is already <Super>s, so we list
-# it explicitly together with F12 (Search+sleep emits F12 via the meta layer).
-# F13 is left untouched: the Assistant key is mapped to F13 and may open
-# Settings (control-center-static) on some distros; that behaviour is
-# intentionally left as-is for now.
-[org.gnome.shell.keybindings]
-toggle-quick-settings=['<Super>s', 'F12']

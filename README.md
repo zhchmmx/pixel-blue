@@ -97,7 +97,7 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
 | `Brightness −` / `+` | Brightness | native pass-through |
 | `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
-| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME default for `toggle-quick-settings`; gschema override lists `<Super>s` and `F12`) |
+| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
 
 ## Search (Meta) held
 
@@ -107,7 +107,7 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | Combo | Emits | Function |
 | --- | --- | --- |
 | `Search` + `Back`…`Vol +` | `F1`–`F10` | the official top-row F-keys |
-| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key); gschema also binds `F12` to Quick Settings |
+| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key) |
 | `Search` + `←` / `→` | bare `Home` / `End` | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
 | `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End` | select to line start / end |
 | `Search` + `Ctrl` + `←` / `→` | `Ctrl+Home` / `Ctrl+End` | start / end of document |
@@ -159,9 +159,7 @@ the owner chose to keep those app shortcuts instead.
   config assumes. Some firmware/distro states report the top row as `f1`–`f10` instead;
   if `keyd monitor` shows that, the left-hand key names above (`zoom`, `scale`, `sleep`,
   and the `back`…`volumeup` list under Search) must be rewritten to the `f1`–`f13` codes.
-  The Three-lines key is likewise assumed to arrive as `sleep`; it is emitted as
-  `Super+S` (GNOME's default `toggle-quick-settings` binding). `Search`+`Three-lines`
-  emits `F12`, which the same gschema override also binds to Quick Settings.
+  The Three-lines key is likewise assumed to arrive as `sleep`.
 
 # Modifications to the Upstream
 
