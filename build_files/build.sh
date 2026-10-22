@@ -229,7 +229,9 @@ gcc -shared -fPIC -O2 \
 	/ctx/plugin/mrchromebox/mrchromebox.c \
 	-o /tmp/libfu_plugin_mrchromebox.so
 install -D -m 0755 /tmp/libfu_plugin_mrchromebox.so "${FWUPD_PLUGIN_DIR}/libfu_plugin_mrchromebox.so"
-dnf5 remove -y fwupd-devel gcc glib2-devel pkgconf-pkg-config
+# Remove the build toolchain, but keep pkgconf-pkg-config: it is a base-image
+# dependency of kmod (required by systemd-udev), so removing it breaks deps.
+dnf5 remove -y fwupd-devel gcc glib2-devel
 
 #### Enable system services
 systemctl enable keyd
