@@ -6,13 +6,20 @@
  *
  * Fedora's fwupd-devel does not ship fwupdplugin.h or a fwupdplugin.pc file,
  * so we declare here exactly the types and functions we link against.  The
- * FuPluginClass layout below is copied verbatim from libfwupdplugin/fu-plugin.h
- * (layouts verified identical across fwupd 2.0.10 - 2.1.8; 2.0.19 appended a
- * trailing slot, which is offset-harmless).  NOTE: symbol-level compatibility
- * is targeted at fwupd 2.1.x (e.g. fu_plugin_add_device only exists from
- * 2.1.1; 2.0.x exported fu_plugin_device_add) - the target image base is
- * Fedora 44 with fwupd 2.1.8.  All other types are used opaquely, and
- * everything else comes from the installed libfwupd headers via <fwupd.h>.
+ * FuPluginClass layout below mirrors libfwupdplugin/fu-plugin.h and is
+ * byte-exact through fwupd 2.1.8 (composite_peek_firmware was appended at
+ * the END in 2.0.19, so trailing additions stay ABI-safe).  A field inserted
+ * in the MIDDLE would shift every later vfunc offset while the plugin still
+ * compiles cleanly, and the daemon would then call write_firmware at the
+ * wrong slot.  That is guarded mechanically, not by hand: build.sh fetches
+ * the real fu-plugin.h of the exact installed fwupd and fails the image
+ * build when this struct stops being a field-order prefix of the upstream
+ * one, and fu_plugin_startup() refuses to load when the running daemon's
+ * class is SMALLER than ours (fields removed or shrunk).  Symbol-level
+ * compatibility targets fwupd >= 2.1.1 (fu_plugin_add_device only exists
+ * from 2.1.1; 2.0.x exported fu_plugin_device_add; build.sh asserts the
+ * floor).  All other types are used opaquely, and everything else comes
+ * from the installed libfwupd headers via <fwupd.h>.
  */
 
 #pragma once
@@ -35,6 +42,12 @@ typedef struct _FuPluginClass FuPluginClass;
 typedef FuPluginClass FuPluginVfuncs;
 
 typedef void (*FuPluginInitVfuncsFunc)(FuPluginVfuncs *vfuncs);
+
+/* GObject type of the plugin base class; exported by libfwupdplugin.  Used
+ * only for the class-size gate in fu_plugin_startup(). */
+GType
+fu_plugin_get_type(void);
+#define FU_TYPE_PLUGIN (fu_plugin_get_type())
 
 /* FuPluginClass - must stay byte-for-byte compatible with libfwupdplugin. */
 struct _FuPluginClass {
@@ -112,6 +125,12 @@ struct _FuPluginClass {
 				 const gchar *key,
 				 const gchar *value,
 				 GError **error);
+	gboolean (*composite_peek_firmware)(FuPlugin *self,
+					   FuDevice *device,
+					   FuFirmware *firmware,
+					   FuProgress *progress,
+					   FwupdInstallFlags flags,
+					   GError **error);
 };
 
 /* The single symbol the fwupd daemon requires from the module. */

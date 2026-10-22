@@ -14,12 +14,19 @@
  * which mirrors the upstream MrChromebox firmware-util.sh logic: probe for
  * BIOS Lock / SPI protected ranges, auto-clear the software write-protect,
  * back up the current flash, then write and verify while holding a
- * systemd-inhibit lock.  On failure a marker file is left under
- * /var/lib/pixel-blue/fwupd/; the user-level pixel-blue-flash-alert units
- * consume it and keep telling the user never to reboot until a retry
- * succeeds.
+ * systemd-inhibit lock.  A marker file under /var/lib/pixel-blue/fwupd/
+ * tracks every attempt: the prepare vfunc opens it as class=A/
+ * state=inprogress at the start of the install transaction and it is
+ * re-written as class=B when the flashrom write begins, so a daemon crash
+ * (OOM kill, vtable/ABI drift, or any other death that runs no error path)
+ * leaves the stale sentinel behind and the user-level
+ * pixel-blue-flash-alert units can still take over; the failure paths flip
+ * state=failed and a success removes the file.  While a class B marker is
+ * alive the alert tells the user never to reboot and hard-blocks
+ * shutdown/sleep through systemd-inhibit.
  */
 
+#include <errno.h>
 #include <fwupd.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,7 +39,15 @@
 #define MRCHROMEBOX_STATE_DIR "/var/lib/pixel-blue/fwupd"
 #define MRCHROMEBOX_MARKER MRCHROMEBOX_STATE_DIR "/flash-failed"
 #define MRCHROMEBOX_BACKUP MRCHROMEBOX_STATE_DIR "/backup.rom"
+#define MRCHROMEBOX_STAGE MRCHROMEBOX_STATE_DIR "/firmware-update.rom"
 #define MRCHROMEBOX_BATTERY_THRESHOLD 50
+
+/* Marker states: the sentinel is written inprogress before any destructive
+ * step and flipped to failed by fu_plugin_fail(); success deletes it.  A
+ * marker still inprogress whose mtime has gone stale means the daemon died
+ * mid-attempt - the user alert picks that case up. */
+#define MRCHROMEBOX_STATE_INPROGRESS "inprogress"
+#define MRCHROMEBOX_STATE_FAILED "failed"
 
 struct MrChromeboxPluginData {
 	gchar *programmer;
@@ -448,7 +463,7 @@ fu_plugin_marker_attempts(void)
 }
 
 static void
-fu_plugin_marker_write(gboolean write_started, guint attempts)
+fu_plugin_marker_write(const gchar *klass, const gchar *state, guint attempts)
 {
 	g_autofree gchar *buf = NULL;
 	g_autoptr(GError) error_local = NULL;
@@ -459,12 +474,36 @@ fu_plugin_marker_write(gboolean write_started, guint attempts)
 			  g_strerror(errno));
 		return;
 	}
-	buf = g_strdup_printf("class=%s\nattempts=%u\n",
-			      write_started ? "B" : "A",
-			      attempts);
+	buf = g_strdup_printf("class=%s\nstate=%s\nattempts=%u\n", klass, state, attempts);
 	if (!g_file_set_contents(MRCHROMEBOX_MARKER, buf, -1, &error_local))
 		g_warning("mrchromebox: failed to write marker: %s",
 			  error_local->message);
+}
+
+/* Open (or reuse) the in-progress crash sentinel for one install
+ * transaction and return its attempt number.  Called from the prepare
+ * vfunc - the earliest engine hook of the transaction - and again from
+ * write_firmware; whoever arrives first bumps the attempt counter, the
+ * later call must not double-count it.  A fresh inprogress marker (a
+ * rewrite is a rename with a new mtime, and prepare and write_firmware run
+ * seconds apart in the same transaction) therefore means "this very
+ * install", while one left over from a crashed attempt is older than the
+ * window and starts a new count. */
+static guint
+fu_plugin_transaction_begin(void)
+{
+	guint attempts = fu_plugin_marker_attempts();
+	g_autofree gchar *contents = NULL;
+	GStatBuf st;
+
+	if (g_file_get_contents(MRCHROMEBOX_MARKER, &contents, NULL, NULL) &&
+	    strstr(contents, "state=" MRCHROMEBOX_STATE_INPROGRESS) != NULL &&
+	    g_stat(MRCHROMEBOX_MARKER, &st) == 0 &&
+	    (gint64)(g_get_real_time() / G_USEC_PER_SEC - (gint64)st.st_mtime) < 120)
+		return attempts;
+	attempts += 1;
+	fu_plugin_marker_write("A", MRCHROMEBOX_STATE_INPROGRESS, attempts);
+	return attempts;
 }
 
 static void
@@ -477,27 +516,44 @@ fu_plugin_marker_remove(void)
 
 /* --- write_firmware ------------------------------------------------------ */
 
-/* Unified failure exit: the GError text is fixed and bilingual for both
- * classes (class A is a conservative no-op, class B is life-saving), details
- * go to the journal and the marker.  Never set NEEDS_REBOOT on failure. */
+/* Unified failure exit: the marker class drives the wording, because one
+ * fixed "do NOT restart" message is a lie for class A (the flash was never
+ * touched there, and crying wolf spends the trust needed for the class B
+ * message that is actually life-saving).  Details go to the journal and
+ * the marker.  Never set NEEDS_REBOOT on failure. */
 static gboolean
 fu_plugin_fail(FuPlugin *self G_GNUC_UNUSED,
 	       gboolean write_started,
 	       guint attempts,
 	       GError **error)
 {
-	g_set_error_literal(error,
-			    FWUPD_ERROR,
-			    FWUPD_ERROR_WRITE,
-			    "固件更新失败：千万不要重启电脑，请在「更新」页再点一次「更新」重试 "
-			    "/ FAILED: do NOT restart - click Update again on the "
-			    "Updates page");
-	fu_plugin_marker_write(write_started, attempts);
+	if (write_started)
+		g_set_error_literal(
+		    error,
+		    FWUPD_ERROR,
+		    FWUPD_ERROR_WRITE,
+		    "固件更新失败：写入已开始，固件可能不完整，千万不要重启电脑；"
+		    "在「更新」页再点一次「更新」重试 "
+		    "/ FAILED mid-write: firmware may be incomplete, do NOT restart; "
+		    "click Update again on the Updates page");
+	else
+		g_set_error_literal(
+		    error,
+		    FWUPD_ERROR,
+		    FWUPD_ERROR_WRITE,
+		    "固件更新失败：写入尚未开始，当前固件完好，重启无害；"
+		    "在「更新」页再点一次「更新」重试 "
+		    "/ FAILED before the flash write: firmware untouched, "
+		    "rebooting is safe; click Update again on the Updates page");
+	fu_plugin_marker_write(write_started ? "B" : "A", MRCHROMEBOX_STATE_FAILED, attempts);
 	if (attempts >= 3) {
-		g_warning("mrchromebox: %u consecutive failures; keep the machine "
-			  "powered on and run 'sudo firmware-util.sh' for "
-			  "diagnosis - still do NOT restart",
-			  attempts);
+		g_warning("mrchromebox: %u consecutive failures; %s",
+			  attempts,
+			  write_started ? "flash may be incomplete - keep the machine "
+					"powered on and run 'sudo firmware-util.sh' for "
+					"diagnosis - still do NOT restart"
+					: "the flash was never touched; rebooting is safe, "
+					  "run 'sudo firmware-util.sh' for diagnosis");
 	}
 	return FALSE;
 }
@@ -600,26 +656,33 @@ fu_plugin_write_firmware(FuPlugin *self,
 			 GError **error)
 {
 	g_autoptr(GBytes) fw = NULL;
-	g_autofree gchar *fwfile = NULL;
 	g_autoptr(GError) error_local = NULL;
-	guint attempts = 0;
+	guint attempts;
+
+	/* 0. crash sentinel: opened by the prepare vfunc at the start of the
+	 * transaction (reused here); an inprogress marker left stale means
+	 * the daemon died mid-transaction and no error path ran -
+	 * inprogress class=A gone stale = died before the write (flash
+	 * intact), class=B = died during the write (flash possibly
+	 * incomplete).  fu_plugin_fail() flips the marker to failed,
+	 * composite_cleanup() catches engine aborts that never reached us,
+	 * and success removes it; the marker IS the crash detection. */
+	attempts = fu_plugin_transaction_begin();
 
 	/* The daemon has already verified the blob against the metadata
-	 * checksum; we only need the raw bytes. */
+	 * checksum; we only need the raw bytes.  A blob that still arrives
+	 * broken (unreadable or empty) is a class A failure: the flash was
+	 * never touched, and the alert path must cover it like any other. */
 	fw = fu_firmware_get_bytes(firmware, &error_local);
 	if (fw == NULL) {
-		g_propagate_error(error, g_steal_pointer(&error_local));
-		return FALSE;
+		g_warning("mrchromebox: cannot read firmware blob: %s",
+			  error_local->message);
+		return fu_plugin_fail(self, FALSE, attempts, error);
 	}
 	if (g_bytes_get_size(fw) == 0) {
-		g_set_error(error,
-			    FWUPD_ERROR,
-			    FWUPD_ERROR_INVALID_FILE,
-			    "firmware blob is empty");
-		return FALSE;
+		g_warning("mrchromebox: firmware blob is empty");
+		return fu_plugin_fail(self, FALSE, attempts, error);
 	}
-
-	attempts = fu_plugin_marker_attempts() + 1;
 
 	/* 1. pre-flight: SMM / SPI protected ranges. */
 	if (!fu_plugin_probe_flash_access(self, &error_local)) {
@@ -671,8 +734,7 @@ fu_plugin_write_firmware(FuPlugin *self,
 	fu_progress_set_percentage(progress, 30);
 
 	/* 5. stage the blob (flashrom takes a file path). */
-	fwfile = g_strdup_printf("%s/firmware-update.rom", MRCHROMEBOX_STATE_DIR);
-	if (!g_file_set_contents(fwfile,
+	if (!g_file_set_contents(MRCHROMEBOX_STAGE,
 				 g_bytes_get_data(fw, NULL),
 				 g_bytes_get_size(fw),
 				 &error_local)) {
@@ -681,27 +743,34 @@ fu_plugin_write_firmware(FuPlugin *self,
 		return fu_plugin_fail(self, FALSE, attempts, error);
 	}
 
-	/* 6. write + verify.  From here on any failure means the flash content
-	 * is not trustworthy (class B). */
+	/* 6. write + verify.  Upgrade the sentinel to class B before the
+	 * first destructive call: from here on a daemon crash leaves a
+	 * possibly incomplete flash, and the alert must say "do NOT restart"
+	 * and hard-block shutdown/sleep. */
+	fu_plugin_marker_write("B", MRCHROMEBOX_STATE_INPROGRESS, attempts);
 	fu_progress_set_status(progress, FWUPD_STATUS_DEVICE_WRITE);
 	fu_progress_set_percentage(progress, 40);
-	if (!fu_plugin_write_flash(self, fwfile, &error_local)) {
+	if (!fu_plugin_write_flash(self, MRCHROMEBOX_STAGE, &error_local)) {
 		g_warning("mrchromebox: flash write failed: %s",
 			  error_local->message);
 		return fu_plugin_fail(self, TRUE, attempts, error);
 	}
 	fu_progress_set_percentage(progress, 80);
-	if (!fu_plugin_verify_flash(self, fwfile, &error_local)) {
+	if (!fu_plugin_verify_flash(self, MRCHROMEBOX_STAGE, &error_local)) {
 		g_warning("mrchromebox: flash verify failed: %s",
 			  error_local->message);
 		return fu_plugin_fail(self, TRUE, attempts, error);
 	}
 	fu_progress_set_percentage(progress, 100);
 
-	/* 7. success: clear the marker, require a reboot to boot the new
-	 * firmware.  Do NOT re-enable the software write-protect (upstream Full
-	 * ROM path never does; there is no WP_RO window to anchor it on). */
+	/* 7. success: clear the marker and the staged blob (every update
+	 * leaves a ~16 MB stale staged ROM behind otherwise; backup.rom is
+	 * the recovery asset and stays).  Require a reboot to boot the new
+	 * firmware.  Do NOT re-enable the software write-protect (upstream
+	 * Full ROM path never does; there is no WP_RO window to anchor it
+	 * on). */
 	fu_plugin_marker_remove();
+	(void)unlink(MRCHROMEBOX_STAGE);
 	fwupd_device_add_flag(FWUPD_DEVICE(device), FWUPD_DEVICE_FLAG_NEEDS_REBOOT);
 	g_debug("mrchromebox: flash update completed; reboot required");
 	return TRUE;
@@ -715,11 +784,32 @@ fu_plugin_startup(FuPlugin *self, FuProgress *progress G_GNUC_UNUSED, GError **e
 	struct MrChromeboxPluginData *data =
 	    (struct MrChromeboxPluginData *)
 		fu_plugin_alloc_data(self, sizeof(struct MrChromeboxPluginData));
+	GTypeQuery class_query;
 	g_autofree gchar *bios_version = NULL;
 	g_autofree gchar *board_name = NULL;
 	g_autofree gchar *product_name = NULL;
 	g_autoptr(GError) error_local = NULL;
 	gboolean is_eve = FALSE;
+
+	/* Gate 0: FuPluginClass ABI sanity.  The daemon dispatches vfuncs at
+	 * the offsets of ITS struct layout; if the running class is smaller
+	 * than the mirror we compiled against, upstream removed or resized
+	 * fields and our write_firmware no longer sits where the daemon
+	 * looks - refuse to load instead of risking a jump into garbage
+	 * mid-flash.  (Larger classes are fine: 2.0.19-style appends at the
+	 * END do not shift our slots, and the build-time prefix check in
+	 * build.sh covers the shift-the-middle case.) */
+	g_type_query(FU_TYPE_PLUGIN, &class_query);
+	if (class_query.class_size < sizeof(FuPluginClass)) {
+		g_set_error(error,
+			    G_IO_ERROR,
+			    G_IO_ERROR_NOT_SUPPORTED,
+			    "FuPluginClass layout mismatch: running daemon class is %u bytes, "
+			    "this plugin was built for %zu bytes",
+			    class_query.class_size,
+			    sizeof(FuPluginClass));
+		return FALSE;
+	}
 
 	/* Gate 1: only UEFI-booted machines. */
 	if (!g_file_test("/sys/firmware/efi", G_FILE_TEST_EXISTS)) {
@@ -824,10 +914,84 @@ fu_plugin_coldplug(FuPlugin *self, FuProgress *progress G_GNUC_UNUSED, GError **
 	return TRUE;
 }
 
+/* The engine runs prepare and composite_cleanup across ALL plugins for
+ * whichever devices are in the transaction, so vfuncs other than
+ * write_firmware must filter on our own GUID before touching shared state. */
+static gboolean
+fu_plugin_is_mrchromebox_device(FuDevice *device)
+{
+	GPtrArray *guids = fwupd_device_get_guids(FWUPD_DEVICE(device));
+
+	if (guids == NULL)
+		return FALSE;
+	for (guint i = 0; i < guids->len; i++) {
+		const gchar *guid = g_ptr_array_index(guids, i);
+		if (g_ascii_strcasecmp(guid, MRCHROMEBOX_GUID) == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static gboolean
+fu_plugin_prepare(FuPlugin *self G_GNUC_UNUSED,
+		  FuDevice *device,
+		  FuProgress *progress G_GNUC_UNUSED,
+		  FwupdInstallFlags flags G_GNUC_UNUSED,
+		  GError **error)
+{
+	/* Earliest hook of the install transaction: open the crash sentinel
+	 * here so a daemon death anywhere after this point - including while
+	 * the engine parses our blob, before it ever reaches
+	 * write_firmware - still lands in the alert system. */
+	if (fu_plugin_is_mrchromebox_device(device))
+		(void)fu_plugin_transaction_begin();
+	return TRUE;
+}
+
+static gboolean
+fu_plugin_composite_cleanup(FuPlugin *self G_GNUC_UNUSED,
+			    GPtrArray *devices,
+			    GError **error)
+{
+	g_autofree gchar *contents = NULL;
+	gboolean ours = FALSE;
+
+	/* composite_cleanup runs for every transaction, including other
+	 * plugins' devices - only react when one of the devices being
+	 * cleaned up is ours */
+	for (guint i = 0; i < devices->len; i++) {
+		FuDevice *device = (FuDevice *)g_ptr_array_index(devices, i);
+		if (fu_plugin_is_mrchromebox_device(device)) {
+			ours = TRUE;
+			break;
+		}
+	}
+	if (!ours)
+		return TRUE;
+	/* On success write_firmware has already removed the marker, so this
+	 * only does something when the transaction was aborted.  If the
+	 * marker is still inprogress here, the engine failed somewhere after
+	 * our prepare but without ever reaching a terminal write_firmware
+	 * state (e.g. the blob failed to parse); nothing was written to the
+	 * flash, so record class A / failed now instead of making the user
+	 * wait for the stale-sentinel grace period.  A daemon that died
+	 * outright runs no cleanup at all - that case stays inprogress and
+	 * the alert's grace window catches it. */
+	if (g_file_get_contents(MRCHROMEBOX_MARKER, &contents, NULL, NULL) &&
+	    strstr(contents, "state=" MRCHROMEBOX_STATE_INPROGRESS) != NULL) {
+		fu_plugin_marker_write("A",
+				       MRCHROMEBOX_STATE_FAILED,
+				       fu_plugin_marker_attempts());
+	}
+	return TRUE;
+}
+
 void
 fu_plugin_init_vfuncs(FuPluginVfuncs *vfuncs)
 {
 	vfuncs->startup = fu_plugin_startup;
 	vfuncs->coldplug = fu_plugin_coldplug;
+	vfuncs->prepare = fu_plugin_prepare;
 	vfuncs->write_firmware = fu_plugin_write_firmware;
+	vfuncs->composite_cleanup = fu_plugin_composite_cleanup;
 }
