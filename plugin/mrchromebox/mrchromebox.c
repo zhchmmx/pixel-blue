@@ -226,8 +226,12 @@ fu_plugin_pr_gpr_locked(const gchar *probe_all)
 			have_bios = TRUE;
 		}
 	}
-	if (!have_bios)
-		return FALSE;
+	if (!have_bios) {
+		/* Without a parseable BIOS FREG we cannot prove the ranges are
+		 * disjoint; this is a bricking-risk flow, so fail closed: the
+		 * caller refuses to flash and surfaces the preflight error. */
+		return TRUE;
+	}
 
 	for (guint i = 0; lines[i] != NULL; i++) {
 		guint64 r_start = 0;
