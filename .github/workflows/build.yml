@@ -151,7 +151,13 @@ jobs:
         run: |
           set -euox pipefail
           for tag in ${ALIAS_TAGS}; do
-            podman push --digestfile=/tmp/digestfile ${IMAGE_NAME}:${tag} ${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}
+            # Publish layers as zstd (#65): skopeo/xorriso preserve layer
+            # compression into the ISO's embedded OCI repo, so smaller layers
+            # shrink the installer ISO and GHCR/update traffic. Plain zstd,
+            # not zstd:chunked: GHCR's CDN rejects the multi-range GETs that
+            # chunked partial pulls need. zstd layers use OCI media types
+            # (docker v2s2 cannot express them); our image is already OCI.
+            podman push --compression-format zstd --compression-level 19 --digestfile=/tmp/digestfile ${IMAGE_NAME}:${tag} ${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}
           done
 
           digest=$(< /tmp/digestfile)
