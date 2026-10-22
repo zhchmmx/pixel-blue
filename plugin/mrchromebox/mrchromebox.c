@@ -28,6 +28,7 @@
 
 #include <errno.h>
 #include <fwupd.h>
+#include <glib/gstdio.h> /* GStatBuf, g_stat */
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
