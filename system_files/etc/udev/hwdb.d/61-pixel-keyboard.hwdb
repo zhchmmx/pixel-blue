@@ -1,6 +1,0 @@
-# Pixelbook (eve): map the Assistant key (AT scancode 0xd8, confirmed via
-# evtest MSC_SCAN) to F13; bind it to any custom shortcut in
-# Settings -> Keyboard -> Custom Shortcuts. The Search/Launcher key is natively
-# leftmeta and needs no remapping.
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pn*:pvr*
- KEYBOARD_KEY_d8=f13

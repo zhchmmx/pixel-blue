@@ -79,8 +79,8 @@ are left unmapped so apps keep them (see **Alt held**). The combos follow
 the official Google shortcut list, and the
 keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
 (verified against upstream `gsettings-desktop-schemas`). The config lives in
-`system_files/etc/keyd/cros.conf` (plus `system_files/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`
-for the Assistant key); this table is the human-readable reference.
+`system_files/etc/keyd/cros.conf` (plus `system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb`
+for the Three-lines and Assistant keys); this table is the human-readable reference.
 
 Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
 [Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
@@ -97,7 +97,7 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
 | `Brightness −` / `+` | Brightness | native pass-through |
 | `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
-| `Three-lines` (`sleep`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
+| `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
 
 ## Search (Meta) held
 
@@ -135,10 +135,18 @@ the owner chose to keep those app shortcuts instead.
 
 - `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
 - **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
-  hwdb to `F13`. On some distros GNOME's `control-center-static` (launch Settings)
-  is bound to `F13`, so the Assistant key may open Settings; this is left as-is
-  for now. Bind `F13` to a custom shortcut in Settings → Keyboard → Custom
-  Shortcuts if desired.
+  hwdb to `F23`. `F13` was abandoned because on some distros GNOME's
+  `control-center-static` binds `F13` to launch Settings — pressing the key opened
+  Settings. `F23` has no GNOME default; bind it to a custom shortcut in
+  Settings → Keyboard → Custom Shortcuts if desired.
+- **Three-lines** key (AT scancode `0x5d`, right of volume-up): ChromeOS names it
+  `KEY_CONTROLPANEL` (and atkbd's *default* keycode for this scancode is `F13` —
+  which is why older images "recognized" the key as F13/Settings, never as sleep).
+  keyd only knows key codes 0–255 and silently discards anything larger while it
+  holds the device (`KEY_CONTROLPANEL` is `0x243`), so the key presses produced
+  nothing and did not even show up in `keyd monitor`. The hwdb therefore maps the
+  scancode to `KEY_DASHBOARD` (keyd name `dashboard`) and keyd assigns the actions
+  (`Super+S` bare, `F12` with `Search`).
 - `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
 
 ## Caveats & not-mapped items
@@ -153,13 +161,27 @@ the owner chose to keep those app shortcuts instead.
 - **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
   touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
   combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
-- **Device-verify before trusting**: run `sudo keyd check` after editing, and use
-  `keyd monitor` to confirm (a) the Assistant key really reports scancode `0xd8`, and
-  (b) the top row arrives as media codes (`back`, `zoom`, `scale`, `sleep`, …) as this
-  config assumes. Some firmware/distro states report the top row as `f1`–`f10` instead;
-  if `keyd monitor` shows that, the left-hand key names above (`zoom`, `scale`, `sleep`,
-  and the `back`…`volumeup` list under Search) must be rewritten to the `f1`–`f13` codes.
-  The Three-lines key is likewise assumed to arrive as `sleep`.
+- **Device-verify before trusting**: run `sudo keyd check` after editing. The raw
+  arrive-as codes (Assistant scancode `0xd8` → `f23`, Three-lines scancode `0x5d`
+  → `dashboard`) are confirmed with `sudo evtest` or
+  `sudo systemd-hwdb query "evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pnEve:pvr*"`;
+  `keyd monitor` shows keyd's *output* after mapping, not scancodes. Also confirm
+  the top row arrives as media codes (`back`, `zoom`, `scale`, …) as this
+  config assumes. Some firmware/distro states report the top row as `f1`–`f10`
+  instead; if `keyd monitor` shows that, the left-hand key names above (`zoom`,
+  `scale`, and the `back`…`volumeup` list under Search) must be rewritten to the
+  `f1`–`f10` codes. The Three-lines key is *not* a sleep key — earlier revisions
+  wrongly assumed it arrived as `sleep`; it is scancode `0x5d` (atkbd default
+  keycode `F13`; ChromeOS calls it `KEY_CONTROLPANEL`), remapped to `dashboard`
+  by the hwdb because keyd cannot see `KEY_CONTROLPANEL` at all (code > 255).
+- **Updated hosts keep `/etc`**: the image build compiles the hwdb with
+  `systemd-hwdb update --usr` (only the compiled `hwdb.bin` is read at runtime).
+  bootc updates preserve `/etc`, so devices from earlier images may still carry
+  the old `/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`. The new `70-` filename
+  deliberately sorts after the legacy `61-` record (all hwdb files merge in
+  lexicographic order and later files win per property), but if a key stops
+  behaving after an update, clean up once:
+  `sudo rm -f /etc/udev/hwdb.d/61-pixel-keyboard.hwdb /etc/udev/hwdb.bin && sudo systemd-hwdb update && sudo udevadm trigger --subsystem-match=input && sudo systemctl restart keyd`.
 
 # Modifications to the Upstream
 
