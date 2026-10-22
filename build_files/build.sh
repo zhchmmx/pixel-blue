@@ -8,11 +8,19 @@ cp -avf "/ctx/system_files"/. /
 ### Install packages
 
 # Packages can be installed from any enabled yum repo on the image.
-# RPMfusion repos are available by default in ublue main images
+# This image builds from the vanilla fedora-silverblue base (not a ublue main
+# image), so RPM Fusion repos are NOT pre-enabled; add them below.
 
 # Install base packages from fedora repos
 dnf5 install -y git git-credential-oauth
 
+# Add RPM Fusion repos (free for ffmpeg/codecs/mesa-freeworld, nonfree for
+# the full intel-media-driver). The release packages are not in the Fedora
+# repos, so install them from the official RPM Fusion URLs, as documented on
+# rpmfusion.org.
+dnf5 install -y \
+  "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
+  "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm"
 # D-Bus bindings and GSettings (PyGObject) used by the ALS auto-brightness
 # daemon (system_files/usr/bin/als-brightness-daemon.py): logind for the
 # backlight, Gio.Settings for the ambient-enabled toggle
@@ -22,6 +30,51 @@ dnf5 install -y python3-dbus python3-gobject-base
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
+
+### Multimedia codecs and hardware video acceleration
+#
+# Full ffmpeg replaces the stripped-down ffmpeg-free shipped by Fedora; the
+# swap is the method recommended by RPM Fusion. --allowerasing is required:
+# ffmpeg-free pulls in the *-free library subpackages (libswscale-free,
+# libavcodec-free, ...) which file-conflict with the complete ffmpeg-libs, and
+# swap alone will not remove them. The gstreamer1-plugins-* packages provide
+# H.264/H.265 and other restricted codecs to GTK/GStreamer based apps,
+# including the GNOME video decoders. gstreamer1-vaapi wires those decoders
+# into VA-API.
+dnf5 swap -y ffmpeg-free ffmpeg --allowerasing --enablerepo=rpmfusion-free
+dnf5 install -y \
+  gstreamer1-plugins-good \
+  gstreamer1-plugins-bad-free \
+  gstreamer1-plugins-bad-freeworld \
+  gstreamer1-plugins-ugly-free \
+  gstreamer1-plugins-ugly \
+  gstreamer1-plugin-libav \
+  gstreamer1-vaapi
+
+# Intel VA-API user-space driver for the Pixelbook (eve) Kaby Lake iGPU.
+# intel-media-driver (iHD) is the actively maintained driver and provides the
+# full decode/encode set: H.264, HEVC 8/10-bit and VP9 8/10-bit. Fedora's
+# libva-intel-media-driver build (a mandatory @multimedia package in the base
+# image) has the patented codecs stripped, so swap it for the complete one
+# from RPM Fusion nonfree (fedy and other distro tools use the same swap).
+# libva-utils ships vainfo for verification.
+#
+# Note: we deliberately do NOT swap mesa-va-drivers for the RPM Fusion
+# -freeworld build. Intel GPUs do not use Mesa for video acceleration (Mesa VA
+# drivers only serve AMD/nouveau); the freeworld mesa swap is what gives AMD
+# cards H.264/H.265 decode. On this Intel Pixelbook it provides no benefit, and
+# it is fragile (its mesa version frequently lags Fedora's updates, breaking the
+# mesa-dri-drivers/libgallium version pins) plus it is a documented cause of
+# GNOME login-screen crashes. iHD above already handles all Intel HW decode.
+dnf5 swap -y libva-intel-media-driver intel-media-driver --enablerepo=rpmfusion-nonfree
+dnf5 install -y libva-utils
+
+### Waydroid (Android in a container)
+#
+# waydroid and waydroid-selinux are in the Fedora repos. System images are not
+# pre-downloaded; on first boot run `sudo waydroid init` to fetch them (an
+# OTA-style download of the LineageOS-based Android image).
+dnf5 install -y waydroid waydroid-selinux
 
 ### Flatpak repositories
 #
@@ -46,6 +99,7 @@ ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
 # or rpm-ostree/bootc layering.
 
 dnf5 remove -y firefox firefox-langpacks
+dnf5 remove -y gnome-shell-extension-background-logo
 
 ### Audio configuration for Pixelbook (eve)
 #
@@ -109,64 +163,23 @@ cp -r /tmp/alsa-ucm-conf-cros/overrides/* /usr/share/alsa/ucm2/conf.d/
 
 ### Keyboard configuration for Pixelbook (eve)
 #
-# Uses keyd to remap the top-row function keys.
-# Source: https://github.com/WeirdTreeThing/cros-keyboard-map
-
-mkdir -p /etc/keyd
-
-cat > /etc/keyd/cros.conf << 'EOF'
-[ids]
-# Pixelbook and Pixelbook Go use AT Keyboard (0001:0001)
-0001:0001
-
-[main]
-# Pixelbook (eve) top-row keys natively emit media keys, not F1-F10:
-#   esc, back, refresh, zoom, scale, brightnessdown, brightnessup,
-#   playpause, mute, volumedown, volumeup, sleep
-# No remapping is needed in the main layer; they pass through as-is.
+# Uses keyd to emulate the ChromeOS key layout. Combos are derived from the
+# official Google ChromeOS shortcut docs (support.google.com/chromebook/answer/
+# 183101 and /1047364); GNOME default bindings are checked against the upstream
+# gsettings-desktop-schemas so keyd output avoids clashing with them. The final
+# mapping table is documented in README.md (Keyboard layout).
 #
-# keyd auto-binds modifier keys to their eponymous layers, but the
-# bindings are declared explicitly here for clarity.
-zoom = f11
-sleep = f12
-meta = layer(meta)
-control = layer(control)
-leftalt = layer(alt)
-rightalt = layer(altgr)
-shift = layer(shift)
+# The keymap data lives in dedicated files under system_files/ and is installed
+# by the `cp -a /ctx/system_files` at the top of this script:
+#   system_files/etc/keyd/cros.conf                    -> /etc/keyd/cros.conf
+#   system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb -> Three-lines key -> dashboard, Assistant key -> F23
+# Edit those files directly; validate with `sudo keyd check` on a device.
 
-[meta]
-# Hold Meta (Search) to use the top-row keys as F1-F10.
-back = f1
-refresh = f2
-zoom = f3
-scale = f4
-brightnessdown = f5
-brightnessup = f6
-playpause = f7
-mute = f8
-volumedown = f9
-volumeup = f10
-sleep = f13
-
-[alt]
-backspace = delete
-brightnessdown = kbdillumdown
-brightnessup = kbdillumup
-
-[control]
-brightnessdown = print
-
-[control+alt]
-backspace = C-A-delete
-EOF
-
-# udev hwdb: remap the top-row key (scan code d8) to leftmeta (search key)
-mkdir -p /etc/udev/hwdb.d
-cat > /etc/udev/hwdb.d/61-pixel-keyboard.hwdb << 'EOF'
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pn*:pvr*
- KEYBOARD_KEY_d8=leftmeta
-EOF
+# Compile the hwdb sources into the binary database udev reads at runtime
+# (hwdb(7): only the compiled database is used). At build time /usr/lib is
+# still writable, so ship the database inside the image like the immutable-image
+# setup systemd documents; nothing else in the build runs systemd-hwdb.
+systemd-hwdb update --usr
 
 # libinput quirks for keyd virtual keyboard
 mkdir -p /etc/libinput
@@ -182,6 +195,18 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
+### GNOME Shell default dash favorites
+#
+# Pin the default apps shown on the GNOME Shell dash. The list is provided as a
+# gschema override in system_files/usr/share/glib-2.0/schemas/, which the
+# "cp -avf /ctx/system_files/. /" at the top of this script places in
+# /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to
+# take effect, so do it after all package operations.
+#
+# Note: this only changes the default for users who never customized their own
+# favorites; it does not override a user's existing dconf value.
+
+glib-compile-schemas /usr/share/glib-2.0/schemas
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
@@ -202,9 +227,10 @@ systemctl --global enable als-brightness.service
 # of this script. Point os-release's LOGO= at it so GNOME surfaces that
 # render the distribution logo (Settings -> About, Overview, GNOME Software)
 # pick up Pixel Blue artwork instead of the Fedora ring. Only the LOGO key
-# is rewritten: NAME/PRETTY_NAME keep the Fedora strings and ID=fedora and
-# the VARIANT* keys stay untouched (Flatpak / GNOME Software detection and
-# the Anaconda Silverblue ISO profile depend on them).
+# is rewritten here: NAME/PRETTY_NAME are rebranded by the #56 section at
+# the end of this script, and ID=fedora and the VARIANT* keys stay
+# untouched (Flatpak / GNOME Software detection and the Anaconda
+# Silverblue ISO profile depend on them).
 
 if grep -q '^LOGO=' /usr/lib/os-release; then
   sed -i 's|^LOGO=.*|LOGO=pixel-blue-logo-icon|' /usr/lib/os-release
@@ -256,8 +282,45 @@ fi
 # First-boot wizard: current gnome-initial-setup (GTK4 rewrite) ships no
 # vendor logo path in its conf (README documents only the [pages] group:
 # skip / new_user_only / existing_user_only), so there is nothing to wire
-# here. The wizard's title string comes from PRETTY_NAME, which stays
-# Fedora-branded until the NAME/PRETTY_NAME decision lands (see #54).
+# here. The wizard's title string comes from PRETTY_NAME, rebranded to
+# Pixel Blue by the #56 section at the end of this script.
 
 # Clean up dnf cache to reduce image size
 dnf5 clean all
+
+### Unify the OS display name (issue #56)
+#
+# The installed system would otherwise show the upstream identity
+# ("Fedora Linux <version> (Silverblue)" and its NAME/VARIANT parts)
+# in gnome-initial-setup, gnome-tour, GNOME Settings -> About and the
+# GRUB entry titles. Rewrite the brand keys of /usr/lib/os-release so
+# all of them say "Pixel Blue".
+#
+# Only NAME and PRETTY_NAME are touched: ID, VERSION*, VARIANT*,
+# PLATFORM_ID and the URL keys must stay intact, because Flatpak,
+# GNOME Software and the Anaconda Silverblue profile detection depend
+# on them.
+#
+# PRETTY_NAME is rewritten wholesale (not by prefix sed, because the
+# upstream value is "Fedora Linux <version> (Silverblue)" and a prefix
+# swap would leave stray words behind); the version is taken from
+# VERSION_ID so the string keeps tracking the base image instead of
+# being hardcoded.
+#
+# This runs last so no dnf5 operation can restore the stock file
+# afterwards. bootc symlinks /etc/os-release to /usr/lib/os-release, so
+# editing the latter covers both.
+
+osrel_version_id="$(sed -n 's/^VERSION_ID=//p' /usr/lib/os-release)"
+if [ -z "$osrel_version_id" ]; then
+    echo "error: could not extract VERSION_ID from /usr/lib/os-release" >&2
+    exit 1
+fi
+
+sed -i -e 's|^NAME=.*|NAME="Pixel Blue"|' \
+       -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"Pixel Blue ${osrel_version_id}\"|" \
+       /usr/lib/os-release
+
+# Fail the build loudly if the rewrite did not land.
+grep -q '^NAME="Pixel Blue"$' /usr/lib/os-release
+grep -q '^PRETTY_NAME="Pixel Blue ' /usr/lib/os-release

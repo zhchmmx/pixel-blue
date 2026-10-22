@@ -1,0 +1,66 @@
+# Installer environment branding (issue #56).
+#
+# Passed to Lorax through the jasonn3 action's additional_templates input
+# (Justfile build-iso recipe and .github/workflows/build-disk.yml). Lorax
+# runs this template while building the Anaconda runtime tree, the tree
+# that becomes / inside the installer environment. That tree is assembled
+# from stock Fedora packages, so it carries "Fedora" branding.
+#
+# Known residual: the boot menu itself still says "Install pixel-blue 44"
+# (grub2-bios/efi.cfg's @PRODUCT@ is substituted by ${product.name}, the
+# -p IMAGE_NAME slug that must stay lowercase for the OCI paths, from an
+# arch-stage template that this action does not expose to additional
+# templates). Only the installer UI/environment is rebranded here.
+#
+# Rebrand the installer environment's os-release. Keep the ID, VERSION*,
+# VARIANT* and PLATFORM_ID keys: Anaconda's Silverblue profile detection
+# matches on the variant. PRETTY_NAME is rewritten wholesale (not by
+# prefix sed, because the upstream value is "Fedora Linux <version>
+# (Silverblue)"); the version comes from lorax's -v argument so it keeps
+# tracking the installer's Fedora release.
+replace '^NAME="[^"]*"' 'NAME="Pixel Blue"' usr/lib/os-release
+replace '^PRETTY_NAME=.*' 'PRETTY_NAME="Pixel Blue ${product.version}"' usr/lib/os-release
+
+# Rebrand the .buildstamp that Anaconda shows as the product name.
+#
+# Lorax writes .buildstamp into the runtime tree itself (pylorax) after
+# all --add-template scripts have run, so it cannot be edited from this
+# template directly. Instead, populate the product/ drop-in directory
+# that the arch template (x86.tmpl) packages into images/product.img:
+# the boot media's product.img archive is unpacked over the installer
+# environment root, so its .buildstamp takes precedence.
+#
+# The content below mirrors what lorax writes for this build (from its
+# -p/-v/-r/-t/--isfinal arguments in the action's Makefile) with only
+# the Product rebranded. UUID and Lorax are replicated with the same
+# algorithms pylorax uses (timestamp + basearch; the pylorax version,
+# "devel" when it cannot be imported, matching buildstamp.py). The
+# UUID suffix interpolates the basearch variable, not arch.basearch:
+# in the add-template phase lorax passes arch as a plain string and
+# basearch as its own variable.
+<%
+import datetime
+import os
+
+_epoch = os.environ.get("SOURCE_DATE_EPOCH")
+if _epoch:
+    _now = datetime.datetime.utcfromtimestamp(int(_epoch))
+else:
+    _now = datetime.datetime.now()
+
+try:
+    import pylorax.version
+    _lorax_ver = pylorax.version.num
+except ImportError:
+    _lorax_ver = "devel"
+%>
+mkdir /usr/share/lorax/product
+append /usr/share/lorax/product/.buildstamp "[Main]"
+append /usr/share/lorax/product/.buildstamp "Product=Pixel Blue"
+append /usr/share/lorax/product/.buildstamp "Version=${product.version}"
+append /usr/share/lorax/product/.buildstamp "BugURL=${product.bugurl}"
+append /usr/share/lorax/product/.buildstamp "IsFinal=${product.isfinal}"
+append /usr/share/lorax/product/.buildstamp "UUID=${_now.strftime('%Y%m%d%H%M')}.${basearch}"
+append /usr/share/lorax/product/.buildstamp "Variant=${product.variant}"
+append /usr/share/lorax/product/.buildstamp "[Compose]"
+append /usr/share/lorax/product/.buildstamp "Lorax=${_lorax_ver}"
