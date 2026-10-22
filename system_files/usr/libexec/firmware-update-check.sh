@@ -100,6 +100,22 @@ atomically_publish() {
   refresh_fwupd
 }
 
+# Each dated release leaves a ~16 MB ROM behind; keep only the image the
+# published metadata currently points at ("" = none) and backup.rom.
+cleanup_stale_roms() {
+  local keep="${1:-}"
+  local f
+
+  for f in "${MRCHROMEBOX_STATE_DIR}"/coreboot_edk2-*-mrchromebox_*.rom; do
+    [[ -e "$f" ]] || continue
+    if [[ -n "$keep" && "$f" == "${MRCHROMEBOX_STATE_DIR}/${keep}" ]]; then
+      continue
+    fi
+    rm -f "$f"
+    log "removed superseded ROM $(basename "$f")"
+  done
+}
+
 publish_metadata_release() {
   local version="$1"
   local date="$2"
@@ -118,7 +134,7 @@ publish_metadata_release() {
     <id>org.mrchromebox.pixelblue.firmware</id>
     <name>MrChromebox UEFI Full ROM</name>
     <summary>Custom UEFI firmware for the Google Pixelbook</summary>
-    <description><p>Update for the MrChromebox UEFI Full ROM running on this Pixelbook. Clicking Update flashes the new firmware directly. If the update fails, do not restart the machine - click Update again to retry.</p></description>
+    <description><p>Update for the MrChromebox UEFI Full ROM running on this Pixelbook. Clicking Update flashes the new firmware directly. If the flash fails, the desktop alert says whether a reboot is safe (the flash was never touched) or forbidden (the write started or was interrupted); in both cases click Update again to retry.</p></description>
     <provides>
       <firmware type="flashed">${MRCHROMEBOX_GUID}</firmware>
     </provides>
@@ -209,10 +225,12 @@ main() {
 
   mkdir -p "${MRCHROMEBOX_STATE_DIR}"
 
-  # No update: publish zero-release metadata and drop any stale marker.
+  # No update: publish zero-release metadata, drop any stale marker and all
+  # cached ROMs (nothing is pending anymore).
   if ((installed >= latest_date)); then
     rm -f "${MRCHROMEBOX_STATE_DIR}/flash-failed"
     publish_metadata_empty
+    cleanup_stale_roms ""
     log "firmware up to date (installed $installed, latest $latest_date)"
     return 0
   fi
@@ -254,6 +272,7 @@ main() {
   # (e.g. "2609.2") is a different space and would compare as OLDER than any
   # date - fwupd would then never show the update button.
   publish_metadata_release "$latest_date" "$latest_date" "$rom_file" "$sha1" "$sha256" "$size"
+  cleanup_stale_roms "$rom_file"
   log "published update metadata for ${latest_version} (${latest_date})"
 }
 
