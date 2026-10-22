@@ -191,6 +191,28 @@ the owner chose to keep those app shortcuts instead.
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
+- Add MrChromebox UEFI firmware update checking and flashing through GNOME Software (see below).
+
+# UEFI Firmware Update (MrChromebox)
+
+Pixel Blue runs on the [MrChromebox](https://mrchromebox.org/) UEFI Full ROM, whose releases are **not** published on LVFS — `fwupdmgr` cannot see them. This image therefore ships its own update channel:
+
+- A weekly systemd timer (`firmware-update-check.timer`) runs `/usr/libexec/firmware-update-check.sh`, which parses the upstream `sources.sh`, compares the published release date with the installed BIOS release date (`/sys/class/dmi/id/bios_date`), and — when a newer release exists — downloads the ROM (plus its upstream `.sha1`), verifies the checksum and publishes local fwupd metadata at `/var/lib/pixel-blue/fwupd/firmware.xml.gz`.
+- A local fwupd remote (`pixel-blue-mrchromebox`) plus the bundled `mrchromebox` plugin make GNOME Software show an **Update** button for the device "MrChromebox UEFI Full ROM". Clicking it flashes the new firmware with `flashrom` as root: the software write-protect is cleared automatically (the hardware write-protect must already be off, which is required to install this image in the first place), the current flash is backed up to `/var/lib/pixel-blue/fwupd/backup.rom`, and the write is held with a `systemd-inhibit` lock. A reboot is required afterwards to boot the new firmware.
+
+If an update fails you will see a critical notification **"固件更新失败——千万不要重启电脑"**: do not shut down or reboot — go back to the GNOME Software Updates page and click Update again to retry (the metadata and ROM stay local, so retrying does not need the network). The notification repeats every 5 minutes until the retry succeeds. If you want to stop the notifications manually:
+
+``` bash
+sudo rm /var/lib/pixel-blue/fwupd/flash-failed
+```
+
+Manual flashing is still possible at any time with the official tool:
+
+``` bash
+curl -LO https://mrchromebox.tech/firmware-util.sh && sudo bash firmware-util.sh
+```
+
+This feature only checks and flashes; it never touches the firmware automatically — updates are user-initiated only.
 
 # Waydroid First-Time Setup
 

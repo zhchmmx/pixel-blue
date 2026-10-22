@@ -1,0 +1,11 @@
+[Unit]
+Description=Notify the user of a failed firmware flash
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/pixel-blue-flash-alert.sh
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=default.target

@@ -191,9 +191,48 @@ ModelTabletModeNoSuspend=1
 EOF
 
 
+### MrChromebox UEFI firmware update support (Issue #69)
+#
+# Pixel Blue checks for MrChromebox UEFI Full ROM updates with an fwupd
+# out-of-tree plugin plus a local metadata remote, so updates show up as an
+# Update button in GNOME Software.  The daemon (root) flashes with flashrom,
+# mirroring the upstream firmware-util.sh logic (auto-clear software
+# write-protect, back up, write, verify); the metadata is generated at
+# runtime by system_files/usr/libexec/firmware-update-check.sh, driven by
+# firmware-update-check.timer.  The plugin source lives in plugin/ and is
+# compiled here against the fwupd-devel that exactly matches the installed
+# daemon, so there is no ABI drift.
+
+# Runtime packages: fwupd (daemon + fwupdmgr), flashrom (flashing), curl
+# (full binary; the base image only ships curl-minimal).
+dnf5 install -y fwupd flashrom curl
+
+# Toolchain used to build the plugin; removed again afterwards (flashrom,
+# fwupd and curl stay as runtime packages).
+#
+# The plugin is compiled directly with gcc.  Fedora's fwupd-devel does not
+# ship the fwupdplugin headers or a fwupdplugin.pc file, so the plugin
+# declares the small API surface it uses itself in
+# plugin/mrchromebox/mrchromebox-plugin.h (layout verified ABI-identical
+# against fwupd 2.0.10-2.1.8); everything else comes from <fwupd.h>.
+# The module must be named "libfu_plugin_<name>.so" for the daemon to load
+# it, and it has to live in ${libdir}/fwupd-<fwupd-version> (the daemon's
+# FU_PATH_KIND_LIBDIR_PKG).
+dnf5 install -y fwupd-devel gcc glib2-devel pkgconf-pkg-config
+FWUPD_PLUGIN_DIR="$(pkg-config --variable=libdir fwupd)/fwupd-$(rpm -q fwupd --qf '%{VERSION}')"
+mapfile -t fwupd_cflags < <(pkg-config --cflags fwupd gio-2.0 glib-2.0)
+gcc -shared -fPIC -O2 \
+	-I/ctx/plugin/mrchromebox \
+	"${fwupd_cflags[@]}" \
+	/ctx/plugin/mrchromebox/mrchromebox.c \
+	-o /tmp/libfu_plugin_mrchromebox.so
+install -D -m 0755 /tmp/libfu_plugin_mrchromebox.so "${FWUPD_PLUGIN_DIR}/libfu_plugin_mrchromebox.so"
+dnf5 remove -y fwupd-devel gcc glib2-devel pkgconf-pkg-config
+
 #### Enable system services
 systemctl enable keyd
 systemctl enable podman.socket
+systemctl enable firmware-update-check.timer
 
 ### GNOME Shell default dash favorites
 #
@@ -210,6 +249,7 @@ glib-compile-schemas /usr/share/glib-2.0/schemas
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
+systemctl --global enable pixel-blue-flash-alert.path
 
 # The ALS daemon is a per-user resident service; it reads
 # org.gnome.settings-daemon.plugins.power ambient-enabled inline and pauses
