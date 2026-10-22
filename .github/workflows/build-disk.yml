@@ -19,6 +19,7 @@ on:
       - main
     paths:
       - 'disk_config/disk.toml'
+      - 'disk_config/install_branding.tmpl'
       - 'flatpak_refs/**'
       - '.github/workflows/build-disk.yml'
 
@@ -189,6 +190,13 @@ jobs:
           version: ${{ env.FEDORA_VERSION }}
           variant: Silverblue
           iso_name: build/pixel-blue.iso
+          # Lorax template run inside the installer environment build
+          # (issue #56): rebrands os-release and .buildstamp to "Pixel
+          # Blue". The action passes it verbatim to lorax --add-template,
+          # so it must be the path of the repo file inside its container,
+          # where the workspace is mounted at /github/workspace. Keep in
+          # sync with the just build-iso recipe.
+          additional_templates: /github/workspace/disk_config/install_branding.tmpl
           # Default Flatpak applications, one ref per file in flatpak_refs/.
           # Pulled from Flathub at build time and embedded in the ISO.
           flatpak_remote_name: flathub
