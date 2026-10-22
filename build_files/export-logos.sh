@@ -8,6 +8,11 @@
 # PNG consumers that cannot read the SVG masters:
 #   - plymouth initramfs renderer (PNG only): spinner/watermark.png
 #   - forced-white consumers (dark surfaces): pixmaps/system-logo-white.png
+#   - gnome-control-center's compile-time About-panel logo:
+#     pixmaps/fedora_logo_med.png + pixmaps/fedora_whitelogo_med.png (the
+#     Fedora g-c-c build hardcodes DISTRIBUTOR_LOGO/DARK_MODE_DISTRIBUTOR_LOGO
+#     to these paths, so it ignores the os-release LOGO= key; overlaying the
+#     two files is what rebrands Settings -> About)
 #   - hicolor PNG ladder (legacy/low-DPI icon fallback): icons/hicolor/NNxNN/apps
 #   - ArtifactHub logo (IMAGE_LOGO_URL in image-template.env): pixel-blue.png
 #   - Anaconda installer sidebar (lorax runtime, see installer-branding.tmpl):
@@ -19,14 +24,30 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 LOGOS=system_files/usr/share/pixel-blue/logos
 ICON=system_files/usr/share/icons/hicolor/scalable/apps/pixel-blue-logo-icon.svg
 
-# Boot splash watermark: white mono symbol, Fedora's spinner default size.
+# Boot splash watermark: white mono horizontal lockup. The default theme is
+# bgrt, whose bgrt.plymouth sets ImageDir=/usr/share/plymouth/themes/spinner
+# and draws watermark.png at the bottom centre (Fedora's own F44 art there is
+# a 149x43 wordmark), so the wide lockup is the right shape here; 400px wide.
 mkdir -p system_files/usr/share/plymouth/themes/spinner
-cairosvg "$LOGOS/pixel-blue-symbol-white.svg" \
+cairosvg "$LOGOS/pixel-blue-lockup-white.svg" \
   -o system_files/usr/share/plymouth/themes/spinner/watermark.png \
-  --output-width 400 --output-height 400
+  --output-width 400
+
+# gnome-control-center About-panel logos: Fedora builds g-c-c with
+# DISTRIBUTOR_LOGO=/usr/share/pixmaps/fedora_logo_med.png and
+# DARK_MODE_DISTRIBUTOR_LOGO=/usr/share/pixmaps/fedora_whitelogo_med.png
+# (compiled in via meson -Ddistributor_logo=..., which makes Settings ->
+# About ignore os-release LOGO= entirely), so rebrand by overlaying these
+# two stock files with the same footprint (upstream ships 279x80 RGBA).
+mkdir -p system_files/usr/share/pixmaps
+cairosvg "$LOGOS/pixel-blue-lockup.svg" \
+  -o system_files/usr/share/pixmaps/fedora_logo_med.png \
+  --output-width 279
+cairosvg "$LOGOS/pixel-blue-lockup-white.svg" \
+  -o system_files/usr/share/pixmaps/fedora_whitelogo_med.png \
+  --output-width 279
 
 # pixmaps white logo (system-logo-white.png), fedora-logos-compatible size.
-mkdir -p system_files/usr/share/pixmaps
 cairosvg "$LOGOS/pixel-blue-symbol-white.svg" \
   -o system_files/usr/share/pixmaps/system-logo-white.png \
   --output-width 256 --output-height 256

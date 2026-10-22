@@ -238,11 +238,19 @@ else
   echo 'LOGO=pixel-blue-logo-icon' >> /usr/lib/os-release
 fi
 
-# Boot splash (phase 2): plymouth renders the system default theme's
-# watermark from the initramfs, and it only reads PNGs. Fedora's default
-# theme is "spinner" and its only distro artwork is watermark.png, so we
-# overlay a white mono PNG export of the symbol master there instead of
-# adding a custom theme (no plymouth-set-default-theme change needed).
+# Boot splash (phase 2): plymouth renders the splash artwork from the
+# initramfs, and it only reads PNGs. Fedora's default theme is "bgrt"
+# (/usr/share/plymouth/plymouthd.defaults); its bgrt.plymouth is a two-step
+# theme whose ImageDir is themes/spinner, so the artwork that actually shows
+# at boot/shutdown is spinner/watermark.png (Fedora ships the distro logo
+# there and nothing else distro-specific in that dir). Overlaying that PNG
+# rebrands the splash without touching theme selection; dracut's plymouth
+# module bakes only the *selected* theme's artwork into the initrd.
+# Note: the shutdown splash reads /usr directly (plymouthd --mode=shutdown is
+# started from the real root), but the boot/login splash uses the initrd copy
+# baked by the dracut below -- and the rpm-ostree rechunk step re-exports the
+# tree with a base-artwork initrd, so the Justfile's ostree-rechunk recipe
+# re-applies this overlay and regenerates once more on the final image.
 # Re-apply after the dnf5 transactions in case a package refresh restored
 # the Fedora copies of these paths.
 cp -avf "/ctx/system_files/usr/share/plymouth/." /usr/share/plymouth/
@@ -261,9 +269,12 @@ gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
 # initrd generic (hardware detection inside the build container would
 # otherwise bake in the CI runner's devices).
 dracut --no-hostonly --regenerate-all --force
-# Assert it landed. dracut's plymouth module bakes in only the *selected*
-# default theme, so this also proves spinner is that theme; if either ever
-# regresses, the build fails loudly instead of booting a Fedora splash.
+# Assert it landed *by content*: the stock fedora-logos watermark lives at
+# the same path, so a bare path grep in lsinitrd would also pass for a
+# freshly-exported-but-unrebranded initrd (this is exactly how issue #75's
+# stale boot splash looked). Compare the baked copy against the overlay.
+wm=usr/share/plymouth/themes/spinner/watermark.png
+wm_want="$(sha256sum "/usr/$wm" | cut -d' ' -f1)"
 splash_baked=0
 for img in /usr/lib/modules/*/initramfs.img /usr/lib/modules/*/images/pxeboot/initramfs.img; do
   [ -f "$img" ] || continue
@@ -271,11 +282,14 @@ for img in /usr/lib/modules/*/initramfs.img /usr/lib/modules/*/images/pxeboot/in
   # lsinitrd and pipefail would report failure for a perfectly good initrd.
   if lsinitrd "$img" > /tmp/lsinitrd.list 2>/dev/null &&
      grep -q 'themes/spinner/watermark.png' /tmp/lsinitrd.list; then
-    splash_baked=1
+    lsinitrd -f "/$wm" "$img" > /tmp/wm_baked.png 2>/dev/null || true
+    if [ "$(sha256sum /tmp/wm_baked.png | cut -d' ' -f1)" = "$wm_want" ]; then
+      splash_baked=1
+    fi
   fi
 done
 if [ "$splash_baked" -ne 1 ]; then
-  echo "error: pixel-blue plymouth watermark not found in any regenerated initramfs" >&2
+  echo "error: pixel-blue plymouth watermark not found (byte-identical) in any regenerated initramfs" >&2
   exit 1
 fi
 

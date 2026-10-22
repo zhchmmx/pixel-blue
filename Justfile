@@ -164,6 +164,16 @@ rechunk $target_image=image_name $tag=default_tag:
     podman tag "${CHUNKED_IMAGE}" "${target_image}:${tag}"
 
 # Split the image for smaller updates (Classical)!
+#
+# The chunker re-exports the whole tree through an ostree commit, and the
+# initramfs that ships in the chunked image carries the *base* plymouth
+# artwork again even though build.sh overlaid and regenerated it (issue #75:
+# boot/GDM-login kept showing the Fedora logo). The overlay itself does
+# survive into the final /usr, which is why the shutdown splash (plymouthd
+# --mode=shutdown runs from the real root) was rebranded. So after
+# rechunking, re-apply the overlay + dracut on the finished image as one
+# derived layer, asserting the baked watermark byte-matches the overlay
+# source.
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
@@ -186,6 +196,43 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --bootc \
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
+
+    # Re-apply the branding overlay on the rechunked image and regenerate the
+    # initramfs, so the boot splash ships our artwork: the chunker re-export
+    # puts the base artwork back into /usr/lib/modules/<kver>/initramfs.img,
+    # which the boot/GDM-login splash reads. The RUN also asserts that the
+    # watermark.png baked in the initrd byte-matches the overlay source, so a
+    # stale splash fails the build loudly. Appending a derived layer keeps the
+    # chunked layering (and thus delta updates) intact.
+    SPLASH_CONTAINERFILE="$(mktemp)"
+    # (written with printf, not a heredoc: `just --fmt` requires every recipe
+    # line to be indented, which a terminating heredoc marker cannot be)
+    printf '%s\n' \
+      'ARG BASE' \
+      'FROM ${BASE}' \
+      'COPY system_files /sf' \
+      'RUN --mount=type=tmpfs,dst=/tmp cp -avf /sf/usr/share/plymouth/. /usr/share/plymouth/ \' \
+      '    && cp -avf /sf/usr/share/pixmaps/. /usr/share/pixmaps/ \' \
+      '    && cp -avf /sf/usr/share/icons/hicolor/. /usr/share/icons/hicolor/ \' \
+      '    && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor \' \
+      '    && dracut --no-hostonly --regenerate-all --force \' \
+      '    && wm=/usr/share/plymouth/themes/spinner/watermark.png \' \
+      '    && want=$(sha256sum "$wm" | cut -d" " -f1) \' \
+      '    && ok=0 \' \
+      '    && for img in /usr/lib/modules/*/initramfs.img; do \' \
+      '        lsinitrd "$img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "themes/spinner/watermark.png" /tmp/lsinitrd.list || continue; \' \
+      '        lsinitrd -f "$wm" "$img" > /tmp/wm_baked.png; \' \
+      '        got=$(sha256sum /tmp/wm_baked.png | cut -d" " -f1); \' \
+      '        [ "$got" = "$want" ] && ok=1; \' \
+      '    done; \' \
+      '    [ "$ok" = 1 ]' \
+      > "${SPLASH_CONTAINERFILE}"
+    podman build --pull=never --layers \
+      --build-arg BASE="localhost/${target_image}:${tag}" \
+      --tag "${target_image}:${tag}" \
+      --file "${SPLASH_CONTAINERFILE}" .
+    rm -f "${SPLASH_CONTAINERFILE}"
 
 # Generate Default Tag
 [group('Utility')]
