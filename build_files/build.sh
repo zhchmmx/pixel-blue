@@ -213,8 +213,9 @@ dnf5 install -y fwupd flashrom curl
 # The plugin is compiled directly with gcc.  Fedora's fwupd-devel does not
 # ship the fwupdplugin headers or a fwupdplugin.pc file, so the plugin
 # declares the small API surface it uses itself in
-# plugin/mrchromebox/mrchromebox-plugin.h (layout verified ABI-identical
-# against fwupd 2.0.10-2.1.8); everything else comes from <fwupd.h>.
+# plugin/mrchromebox/mrchromebox-plugin.h (FuPluginClass layout verified
+# ABI-identical across fwupd 2.0.10-2.1.8; symbol API targets fwupd 2.1.x,
+# matching this image's fwupd 2.1.8); everything else comes from <fwupd.h>.
 # The module must be named "libfu_plugin_<name>.so" for the daemon to load
 # it, and it has to live in ${libdir}/fwupd-<fwupd-version> (the daemon's
 # FU_PATH_KIND_LIBDIR_PKG).

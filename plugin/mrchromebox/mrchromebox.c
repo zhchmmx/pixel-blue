@@ -266,16 +266,24 @@ fu_plugin_wp_status(FuPlugin *self, gboolean *wp_supported, gboolean *wp_enabled
 		*wp_enabled = FALSE;
 		return TRUE;
 	}
-	/* Recent flashrom prints "Hardware write-protect: enabled" and
-	 * "Software write-protect: enabled"; older builds used "WP: enabled".
-	 * Programmers without WP registers (e.g. dummy) print neither. */
-	*wp_supported = strstr(status_out, "write-protect:") != NULL;
-	*wp_enabled = strstr(status_out, "write-protect: enabled") != NULL;
-	if (!*wp_supported)
-		*wp_supported = strstr(status_out, "WP:") != NULL;
-	if (!*wp_enabled && *wp_supported) {
-		const gchar *pos = strstr(status_out, "write-protect:");
-		*wp_enabled = pos != NULL && strstr(pos, "enabled") != NULL;
+	/* flashrom --wp-status (1.4+) prints "Protection range: start=…
+	 * length=…" and "Protection mode: disabled|hardware|power_cycle|
+	 * permanent|unknown".  Programmers without WP registers print neither
+	 * line.  Match on the actual "Protection mode:" line, not the
+	 * non-existent "write-protect:" strings older code assumed. */
+	{
+		const gchar *pos = strstr(status_out, "Protection mode:");
+		if (pos == NULL) {
+			*wp_supported = FALSE;
+			*wp_enabled = FALSE;
+			return TRUE;
+		}
+		pos += strlen("Protection mode:");
+		while (g_ascii_isspace(*pos))
+			pos++;
+		*wp_supported = TRUE;
+		/* "disabled" may carry a trailing note (e.g. "(active)"). */
+		*wp_enabled = !g_str_has_prefix(pos, "disabled");
 	}
 	return TRUE;
 }
@@ -441,23 +449,46 @@ fu_plugin_write_flash(FuPlugin *self, const gchar *fwfile, GError **error)
 	g_autofree gchar *out = NULL;
 	const gchar *args[] = {"-w", fwfile, NULL};
 
-	return fu_plugin_flashrom_inhibited_run(self,
-						args,
-						&exit_status,
-						&out,
-						error) &&
-	       exit_status == 0;
+	/* fu_plugin_flashrom_inhibited_run returns TRUE as long as the process
+	 * ran at all; a non-zero exit leaves *error unset, so fill it here -
+	 * callers dereference it unconditionally. */
+	if (!fu_plugin_flashrom_inhibited_run(self,
+					       args,
+					       &exit_status,
+					       &out,
+					       error) ||
+	    exit_status != 0) {
+		if (error != NULL && *error == NULL)
+			g_set_error(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_FAILED,
+				    "flashrom write exited with status %d",
+				    exit_status);
+		return FALSE;
+	}
+	return TRUE;
 }
 
 static gboolean
-fu_plugin_verify_flash(FuPlugin *self, GError **error)
+fu_plugin_verify_flash(FuPlugin *self, const gchar *fwfile, GError **error)
 {
 	gint exit_status = 0;
 	g_autofree gchar *out = NULL;
-	static const gchar *const args[] = {"-v", NULL};
+	const gchar *args[] = {"-v", fwfile, NULL};
 
-	return fu_plugin_flashrom_run(self, args, &exit_status, &out, error) &&
-	       exit_status == 0;
+	/* Same contract as write: a non-zero exit must still yield an error
+	 * object so callers can dereference it safely. */
+	if (!fu_plugin_flashrom_run(self, args, &exit_status, &out, error) ||
+	    exit_status != 0) {
+		if (error != NULL && *error == NULL)
+			g_set_error(error,
+				    G_IO_ERROR,
+				    G_IO_ERROR_FAILED,
+				    "flashrom verify exited with status %d",
+				    exit_status);
+		return FALSE;
+	}
+	return TRUE;
 }
 
 static gboolean
@@ -589,7 +620,7 @@ fu_plugin_write_firmware(FuPlugin *self,
 		return fu_plugin_fail(self, TRUE, attempts, error);
 	}
 	fu_progress_set_percentage(progress, 80);
-	if (!fu_plugin_verify_flash(self, &error_local)) {
+	if (!fu_plugin_verify_flash(self, fwfile, &error_local)) {
 		g_warning("mrchromebox: flash verify failed: %s",
 			  error_local->message);
 		return fu_plugin_fail(self, TRUE, attempts, error);
@@ -704,6 +735,12 @@ fu_plugin_coldplug(FuPlugin *self, FuProgress *progress G_GNUC_UNUSED, GError **
 	fwupd_device_add_icon(FWUPD_DEVICE(device), "computer");
 	fwupd_device_add_guid(FWUPD_DEVICE(device), MRCHROMEBOX_GUID);
 	fwupd_device_set_version_format(FWUPD_DEVICE(device), FWUPD_VERSION_FORMAT_NUMBER);
+	/* The version string must be set, not just version_raw: fwupd refuses
+	 * devices without a version ("no version set") and GNOME Software hides
+	 * them.  Same YYYYMMDD space as the metadata (firmware-update-check.sh
+	 * publishes release version = release_current_date), so plain numeric
+	 * comparison works and 20261015 > 20260715 as expected. */
+	fwupd_device_set_version(FWUPD_DEVICE(device), bios_date);
 	fwupd_device_set_version_raw(FWUPD_DEVICE(device), version);
 	fwupd_device_add_flag(FWUPD_DEVICE(device), FWUPD_DEVICE_FLAG_UPDATABLE);
 	fwupd_device_set_install_duration(FWUPD_DEVICE(device), 60);

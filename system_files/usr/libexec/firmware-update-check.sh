@@ -249,7 +249,11 @@ main() {
     read -r sha1 sha256 size <<<"$checksum_line"
   fi
 
-  publish_metadata_release "$latest_version" "$latest_date" "$rom_file" "$sha1" "$sha256" "$size"
+  # Publish version = release date (YYYYMMDD), the SAME version space as the
+  # plugin device (DMI bios_date as a NUMBER); upstream's release_current_version
+  # (e.g. "2609.2") is a different space and would compare as OLDER than any
+  # date - fwupd would then never show the update button.
+  publish_metadata_release "$latest_date" "$latest_date" "$rom_file" "$sha1" "$sha256" "$size"
   log "published update metadata for ${latest_version} (${latest_date})"
 }
 

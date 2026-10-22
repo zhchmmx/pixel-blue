@@ -7,9 +7,12 @@
  * Fedora's fwupd-devel does not ship fwupdplugin.h or a fwupdplugin.pc file,
  * so we declare here exactly the types and functions we link against.  The
  * FuPluginClass layout below is copied verbatim from libfwupdplugin/fu-plugin.h
- * (fwupd 2.0.10 - 2.1.8, layouts verified identical), so the vfunc table
- * offsets are ABI-correct.  All other types are used opaquely, and everything
- * else comes from the installed libfwupd headers via <fwupd.h>.
+ * (layouts verified identical across fwupd 2.0.10 - 2.1.8; 2.0.19 appended a
+ * trailing slot, which is offset-harmless).  NOTE: symbol-level compatibility
+ * is targeted at fwupd 2.1.x (e.g. fu_plugin_add_device only exists from
+ * 2.1.1; 2.0.x exported fu_plugin_device_add) - the target image base is
+ * Fedora 44 with fwupd 2.1.8.  All other types are used opaquely, and
+ * everything else comes from the installed libfwupd headers via <fwupd.h>.
  */
 
 #pragma once
