@@ -271,11 +271,13 @@ fu_plugin_probe_flash_access(FuPlugin *self, GError **error)
 		return TRUE;
 
 	/* SMM protection is announced with msg_pwarn -> stderr ("BIOS region SMM
-	 * protection is enabled"), so search the merged output. */
-	if ((probe_out != NULL &&
-	     strstr(probe_out, "BIOS region SMM protection is enabled") != NULL) ||
-	    (probe_err != NULL &&
-	     strstr(probe_err, "BIOS region SMM protection is enabled") != NULL)) {
+	 * protection is enabled").  The PR/GPR overlap gate needs both classes of
+	 * line in ONE buffer: the BIOS FREG is msg_pinfo -> stdout, while the
+	 * PR0:/GPR0: warnings are msg_pwarn -> stderr.  Merge before scanning. */
+	g_autofree gchar *probe_all = g_strdup_printf("%s%s",
+						      probe_out != NULL ? probe_out : "",
+						      probe_err != NULL ? probe_err : "");
+	if (strstr(probe_all, "BIOS region SMM protection is enabled") != NULL) {
 		g_set_error(error,
 			    G_IO_ERROR,
 			    G_IO_ERROR_PERMISSION_DENIED,
@@ -284,9 +286,7 @@ fu_plugin_probe_flash_access(FuPlugin *self, GError **error)
 			    "then retry");
 		return FALSE;
 	}
-	if ((probe_out != NULL &&
-	     fu_plugin_pr_gpr_locked(probe_out)) ||
-	    (probe_err != NULL && fu_plugin_pr_gpr_locked(probe_err))) {
+	if (fu_plugin_pr_gpr_locked(probe_all)) {
 		g_set_error(error,
 			    G_IO_ERROR,
 			    G_IO_ERROR_PERMISSION_DENIED,
@@ -325,6 +325,9 @@ fu_plugin_wp_status(FuPlugin *self, gboolean *wp_supported, gboolean *wp_enabled
 	{
 		const gchar *pos = strstr(status_out, "Protection mode:");
 		if (pos == NULL) {
+			/* flashrom explains an unreadable/permanent WP on stderr. */
+			if (status_err != NULL && status_err[0] != '\0')
+				g_debug("mrchromebox: --wp-status stderr: %s", status_err);
 			*wp_supported = FALSE;
 			*wp_enabled = FALSE;
 			return TRUE;
@@ -802,7 +805,8 @@ fu_plugin_coldplug(FuPlugin *self, FuProgress *progress G_GNUC_UNUSED, GError **
 	 * Same space as the metadata (firmware-update-check.sh publishes
 	 * release version = release_current_date), so 20261015 > 20260715
 	 * compares as expected. */
-	fwupd_device_set_version(FWUPD_DEVICE(device), fu_plugin_number_to_bios_date(version));
+	g_autofree gchar *version_str = fu_plugin_number_to_bios_date(version);
+	fwupd_device_set_version(FWUPD_DEVICE(device), version_str);
 	fwupd_device_set_version_raw(FWUPD_DEVICE(device), version);
 	fwupd_device_add_flag(FWUPD_DEVICE(device), FWUPD_DEVICE_FLAG_UPDATABLE);
 	fwupd_device_set_install_duration(FWUPD_DEVICE(device), 60);
