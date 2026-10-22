@@ -21,6 +21,7 @@ dnf5 install -y python3-dbus
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
+dnf5 install -y PackageKit-bootc
 
 ### Flatpak repositories
 #
