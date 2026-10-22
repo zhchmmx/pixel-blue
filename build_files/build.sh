@@ -220,7 +220,9 @@ dnf5 install -y fwupd flashrom curl
 # FU_PATH_KIND_LIBDIR_PKG).
 dnf5 install -y fwupd-devel gcc glib2-devel pkgconf-pkg-config
 FWUPD_PLUGIN_DIR="$(pkg-config --variable=libdir fwupd)/fwupd-$(rpm -q fwupd --qf '%{VERSION}')"
-mapfile -t fwupd_cflags < <(pkg-config --cflags fwupd gio-2.0 glib-2.0)
+# pkg-config prints all flags on ONE line, so split words with read -r -a;
+# mapfile would split by lines and collapse every -I/-D into one argument.
+read -r -a fwupd_cflags < <(pkg-config --cflags fwupd gio-2.0 glib-2.0)
 gcc -shared -fPIC -O2 \
 	-I/ctx/plugin/mrchromebox \
 	"${fwupd_cflags[@]}" \
