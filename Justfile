@@ -211,21 +211,25 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       'ARG BASE' \
       'FROM ${BASE}' \
       'COPY system_files /sf' \
-      'RUN --mount=type=tmpfs,dst=/tmp cp -avf /sf/usr/share/plymouth/. /usr/share/plymouth/ \' \
-      '    && cp -avf /sf/usr/share/pixmaps/. /usr/share/pixmaps/ \' \
-      '    && cp -avf /sf/usr/share/icons/hicolor/. /usr/share/icons/hicolor/ \' \
-      '    && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor \' \
-      '    && dracut --no-hostonly --regenerate-all --force \' \
-      '    && wm=/usr/share/plymouth/themes/spinner/watermark.png \' \
-      '    && want=$(sha256sum "$wm" | cut -d" " -f1) \' \
-      '    && ok=0 \' \
-      '    && for img in /usr/lib/modules/*/initramfs.img; do \' \
+      'RUN --mount=type=tmpfs,dst=/tmp cp -avf /sf/usr/share/plymouth/. /usr/share/plymouth/ && \' \
+      '    cp -avf /sf/usr/share/pixmaps/. /usr/share/pixmaps/ && \' \
+      '    cp -avf /sf/usr/share/icons/hicolor/. /usr/share/icons/hicolor/ && \' \
+      '    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor && \' \
+      '    mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
+      '    dracut --no-hostonly --regenerate-all --force && \' \
+      '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
+      '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \
+      '    ok=0 && \' \
+      '    for img in /usr/lib/modules/*/initramfs.img; do \' \
       '        lsinitrd "$img" > /tmp/lsinitrd.list; \' \
       '        grep -q "themes/spinner/watermark.png" /tmp/lsinitrd.list || continue; \' \
       '        lsinitrd -f "$wm" "$img" > /tmp/wm_baked.png; \' \
       '        got=$(sha256sum /tmp/wm_baked.png | cut -d" " -f1); \' \
       '        [ "$got" = "$want" ] && ok=1; \' \
       '    done; \' \
+      '    if [ "$ok" != 1 ]; then echo "plymouth theme files in initrd:"; \' \
+      '        for img in /usr/lib/modules/*/initramfs.img; do lsinitrd "$img" | grep "themes/"; done; \' \
+      '        exit 1; fi; \' \
       '    [ "$ok" = 1 ]' \
       > "${SPLASH_CONTAINERFILE}"
     podman build --pull=never --layers \

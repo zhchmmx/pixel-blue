@@ -268,13 +268,18 @@ gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
 # docs.fedoraproject.org/en-US/bootc/initramfs/). --no-hostonly keeps the
 # initrd generic (hardware detection inside the build container would
 # otherwise bake in the CI runner's devices).
+# /root is a symlink to /var/roothome on bootc bases and the target does not
+# exist in the build container yet; dracut-install aborts on it ("ERROR:
+# installing '/root'"), so create it first (empty; systemd-tmpfiles owns the
+# real directory at runtime).
+mkdir -p /var/roothome && chmod 700 /var/roothome
 dracut --no-hostonly --regenerate-all --force
 # Assert it landed *by content*: the stock fedora-logos watermark lives at
 # the same path, so a bare path grep in lsinitrd would also pass for a
 # freshly-exported-but-unrebranded initrd (this is exactly how issue #75's
 # stale boot splash looked). Compare the baked copy against the overlay.
-wm=usr/share/plymouth/themes/spinner/watermark.png
-wm_want="$(sha256sum "/usr/$wm" | cut -d' ' -f1)"
+wm=/usr/share/plymouth/themes/spinner/watermark.png
+wm_want="$(sha256sum "$wm" | cut -d' ' -f1)"
 splash_baked=0
 for img in /usr/lib/modules/*/initramfs.img /usr/lib/modules/*/images/pxeboot/initramfs.img; do
   [ -f "$img" ] || continue
@@ -282,14 +287,14 @@ for img in /usr/lib/modules/*/initramfs.img /usr/lib/modules/*/images/pxeboot/in
   # lsinitrd and pipefail would report failure for a perfectly good initrd.
   if lsinitrd "$img" > /tmp/lsinitrd.list 2>/dev/null &&
      grep -q 'themes/spinner/watermark.png' /tmp/lsinitrd.list; then
-    lsinitrd -f "/$wm" "$img" > /tmp/wm_baked.png 2>/dev/null || true
+    lsinitrd -f "$wm" "$img" > /tmp/wm_baked.png 2>/dev/null || true
     if [ "$(sha256sum /tmp/wm_baked.png | cut -d' ' -f1)" = "$wm_want" ]; then
       splash_baked=1
     fi
   fi
 done
 if [ "$splash_baked" -ne 1 ]; then
-  echo "error: pixel-blue plymouth watermark not found (byte-identical) in any regenerated initramfs" >&2
+  echo "error: pixel-blue plymouth watermark not byte-identical in any regenerated initramfs" >&2
   exit 1
 fi
 
