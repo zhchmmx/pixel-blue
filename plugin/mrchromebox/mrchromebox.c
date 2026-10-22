@@ -281,6 +281,11 @@ fu_plugin_probe_flash_access(FuPlugin *self, GError **error)
 	g_autofree gchar *probe_all = g_strdup_printf("%s%s",
 						      probe_out != NULL ? probe_out : "",
 						      probe_err != NULL ? probe_err : "");
+	/* Keep the raw probe output in the journal: the preflight gates can
+	 * refuse a flash without any overlap having been observed (fail-closed
+	 * no-FREG path), and without this the actual flashrom lines would be
+	 * dropped entirely. */
+	g_debug("mrchromebox: flashrom probe output: %s", probe_all);
 	if (strstr(probe_all, "BIOS region SMM protection is enabled") != NULL) {
 		g_set_error(error,
 			    G_IO_ERROR,
