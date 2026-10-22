@@ -9,12 +9,12 @@
  * FuPluginClass layout below is copied verbatim from libfwupdplugin/fu-plugin.h
  * (fwupd 2.0.10 - 2.1.8, layouts verified identical), so the vfunc table
  * offsets are ABI-correct.  All other types are used opaquely, and everything
- * else comes from the installed libfwupd headers via <libfwupd/fwupd.h>.
+ * else comes from the installed libfwupd headers via <fwupd.h>.
  */
 
 #pragma once
 
-#include <libfwupd/fwupd.h>
+#include <fwupd.h>
 #include <gio/gio.h>
 #include <glib-object.h>
 
