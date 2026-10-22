@@ -44,6 +44,7 @@ static gboolean
 fu_plugin_run_argv(const gchar *const *argv,
 		   gint *exit_status,
 		   gchar **stdout_buf,
+		   gchar **stderr_buf,
 		   GError **error)
 {
 	g_autoptr(GSubprocess) sub = NULL;
@@ -72,8 +73,14 @@ fu_plugin_run_argv(const gchar *const *argv,
 		*exit_status = g_subprocess_get_exit_status(sub);
 	if (stdout_buf != NULL)
 		*stdout_buf = g_steal_pointer(&stdout_data);
-	if (stderr_data != NULL && stderr_data[0] != '\0')
+	if (stderr_buf != NULL) {
+		*stderr_buf = g_steal_pointer(&stderr_data);
+	} else if (stderr_data != NULL && stderr_data[0] != '\0') {
+		/* flashrom routes WARN/ERROR (msg_pwarn/msg_perr) to stderr, and
+		 * the SMM/PR safety-gate strings live there; only fall back to
+		 * debug output when the caller did not ask for stderr. */
 		g_debug("mrchromebox: stderr: %s", stderr_data);
+	}
 	return TRUE;
 }
 
@@ -82,6 +89,7 @@ fu_plugin_flashrom_run(FuPlugin *self,
 		       const gchar *const *args,
 		       gint *exit_status,
 		       gchar **stdout_buf,
+		       gchar **stderr_buf,
 		       GError **error)
 {
 	struct MrChromeboxPluginData *data =
@@ -100,6 +108,7 @@ fu_plugin_flashrom_run(FuPlugin *self,
 	return fu_plugin_run_argv((const gchar *const *)argv->pdata,
 				  exit_status,
 				  stdout_buf,
+				  stderr_buf,
 				  error);
 }
 
@@ -108,6 +117,7 @@ fu_plugin_flashrom_inhibited_run(FuPlugin *self,
 				 const gchar *const *args,
 				 gint *exit_status,
 				 gchar **stdout_buf,
+				 gchar **stderr_buf,
 				 GError **error)
 {
 	struct MrChromeboxPluginData *data =
@@ -135,6 +145,7 @@ fu_plugin_flashrom_inhibited_run(FuPlugin *self,
 	return fu_plugin_run_argv((const gchar *const *)argv->pdata,
 				  exit_status,
 				  stdout_buf,
+				  stderr_buf,
 				  error);
 }
 
@@ -174,16 +185,30 @@ fu_plugin_bios_date_to_number(const gchar *bios_date, GError **error)
 	return year * 10000 + month * 100 + day;
 }
 
+/* YYYYMMDD -> "YYYYMMDD" (owned by caller). */
+static gchar *
+fu_plugin_number_to_bios_date(guint version)
+{
+	return g_strdup_printf("%08u", version);
+}
+
 /* --- write-protect / flash access helpers ------------------------------- */
 
 /* Port of MrChromebox intel_pr_gpr_locked(): true if a PR0/GPR0 read-only
  * range overlaps the BIOS FREG.  ME-only GPR0 is ignored; FREG0/FREG2 being
  * read-only is normal.  Without a parseable BIOS FREG we cannot prove the
- * ranges are disjoint, so behave conservatively. */
+ * ranges are disjoint, so behave conservatively.
+ *
+ * The BIOS FREG line is printed with msg_pinfo (stdout):
+ *     "FREG1: BIOS region (0x%08x-0x%08x) is read-write."
+ * while the PR/GPR ranges are warnings (msg_pwarn -> stderr), each prefixed:
+ *     "PR0: Warning: 0x%08x-0x%08x is read-only."
+ *     "GPR0: Warning: 0x%08x-0x%08x is locked."
+ * Pass the concatenated stdout+stderr so both classes of lines match. */
 static gboolean
-fu_plugin_pr_gpr_locked(const gchar *probe_out)
+fu_plugin_pr_gpr_locked(const gchar *probe_all)
 {
-	g_auto(GStrv) lines = g_strsplit(probe_out, "\n", -1);
+	g_auto(GStrv) lines = g_strsplit(probe_all, "\n", -1);
 	guint64 bios_start = 0;
 	guint64 bios_end = 0;
 	gboolean have_bios = FALSE;
@@ -207,12 +232,19 @@ fu_plugin_pr_gpr_locked(const gchar *probe_out)
 	for (guint i = 0; lines[i] != NULL; i++) {
 		guint64 r_start = 0;
 		guint64 r_end = 0;
+		const gchar *line = lines[i];
 
-		if (sscanf(lines[i],
-			   "Warning: 0x%llx-0x%llx is read-only",
+		if (sscanf(line,
+			   "PR0: Warning: 0x%llx-0x%llx",
+			   (unsigned long long *)&r_start,
+			   (unsigned long long *)&r_end) != 2 &&
+		    sscanf(line,
+			   "GPR0: Warning: 0x%llx-0x%llx",
 			   (unsigned long long *)&r_start,
 			   (unsigned long long *)&r_end) != 2)
 			continue;
+		/* The trailing state is "read-only." or "locked."; either one
+		 * blocks a host write into that window. */
 		if (r_start <= bios_end && bios_start <= r_end)
 			return TRUE;
 	}
@@ -223,16 +255,27 @@ static gboolean
 fu_plugin_probe_flash_access(FuPlugin *self, GError **error)
 {
 	g_autofree gchar *probe_out = NULL;
+	g_autofree gchar *probe_err = NULL;
 	gint exit_status = 0;
 	static const gchar *const args[] = {NULL};
 
 	/* A failed probe is not fatal by itself: treat it as "no info" and let
-	 * the actual write surface any real problem. */
-	if (!fu_plugin_flashrom_run(self, args, &exit_status, &probe_out, NULL))
+	 * the actual write surface any real problem.  SMM and PR warnings are
+	 * emitted via msg_pwarn -> stderr, so capture both streams. */
+	if (!fu_plugin_flashrom_run(self,
+				    args,
+				    &exit_status,
+				    &probe_out,
+				    &probe_err,
+				    NULL))
 		return TRUE;
 
-	if (probe_out != NULL &&
-	    strstr(probe_out, "BIOS region SMM protection is enabled") != NULL) {
+	/* SMM protection is announced with msg_pwarn -> stderr ("BIOS region SMM
+	 * protection is enabled"), so search the merged output. */
+	if ((probe_out != NULL &&
+	     strstr(probe_out, "BIOS region SMM protection is enabled") != NULL) ||
+	    (probe_err != NULL &&
+	     strstr(probe_err, "BIOS region SMM protection is enabled") != NULL)) {
 		g_set_error(error,
 			    G_IO_ERROR,
 			    G_IO_ERROR_PERMISSION_DENIED,
@@ -241,7 +284,9 @@ fu_plugin_probe_flash_access(FuPlugin *self, GError **error)
 			    "then retry");
 		return FALSE;
 	}
-	if (probe_out != NULL && fu_plugin_pr_gpr_locked(probe_out)) {
+	if ((probe_out != NULL &&
+	     fu_plugin_pr_gpr_locked(probe_out)) ||
+	    (probe_err != NULL && fu_plugin_pr_gpr_locked(probe_err))) {
 		g_set_error(error,
 			    G_IO_ERROR,
 			    G_IO_ERROR_PERMISSION_DENIED,
@@ -256,10 +301,16 @@ static gboolean
 fu_plugin_wp_status(FuPlugin *self, gboolean *wp_supported, gboolean *wp_enabled, GError **error)
 {
 	g_autofree gchar *status_out = NULL;
+	g_autofree gchar *status_err = NULL;
 	gint exit_status = 0;
 	static const gchar *const args[] = {"--wp-status", NULL};
 
-	if (!fu_plugin_flashrom_run(self, args, &exit_status, &status_out, error))
+	if (!fu_plugin_flashrom_run(self,
+				    args,
+				    &exit_status,
+				    &status_out,
+				    &status_err,
+				    error))
 		return FALSE;
 	if (status_out == NULL) {
 		*wp_supported = FALSE;
@@ -289,24 +340,21 @@ fu_plugin_wp_status(FuPlugin *self, gboolean *wp_supported, gboolean *wp_enabled
 }
 
 /* Mirrors upstream clear_software_wp(): --wp-disable, then
- * --wp-range 0 0 with the legacy "0,0" fallback. */
+ * --wp-range 0,0 (start=0, len=0 unprotects the whole flash; this is the
+ * documented form - the "0 0" two-argument form does not exist). */
 static gboolean
 fu_plugin_wp_disable(FuPlugin *self, GError **error)
 {
 	gint exit_status = 0;
 	g_autofree gchar *out = NULL;
 	static const gchar *const args_disable[] = {"--wp-disable", NULL};
-	static const gchar *const args_range[] = {"--wp-range", "0", "0", NULL};
-	static const gchar *const args_range_legacy[] = {"--wp-range", "0,0", NULL};
+	static const gchar *const args_range[] = {"--wp-range", "0,0", NULL};
 
 	/* --wp-disable fails cleanly when WP is already off, which is fine. */
-	if (!fu_plugin_flashrom_run(self, args_disable, &exit_status, &out, NULL) ||
+	if (!fu_plugin_flashrom_run(self, args_disable, &exit_status, &out, NULL, NULL) ||
 	    exit_status != 0)
 		g_debug("mrchromebox: --wp-disable did not report success");
-	if (fu_plugin_flashrom_run(self, args_range, &exit_status, &out, NULL) &&
-	    exit_status == 0)
-		return TRUE;
-	if (fu_plugin_flashrom_run(self, args_range_legacy, &exit_status, &out, NULL) &&
+	if (fu_plugin_flashrom_run(self, args_range, &exit_status, &out, NULL, NULL) &&
 	    exit_status == 0)
 		return TRUE;
 	g_set_error(error,
@@ -456,6 +504,7 @@ fu_plugin_write_flash(FuPlugin *self, const gchar *fwfile, GError **error)
 					       args,
 					       &exit_status,
 					       &out,
+					       NULL,
 					       error) ||
 	    exit_status != 0) {
 		if (error != NULL && *error == NULL)
@@ -478,7 +527,12 @@ fu_plugin_verify_flash(FuPlugin *self, const gchar *fwfile, GError **error)
 
 	/* Same contract as write: a non-zero exit must still yield an error
 	 * object so callers can dereference it safely. */
-	if (!fu_plugin_flashrom_run(self, args, &exit_status, &out, error) ||
+	if (!fu_plugin_flashrom_run(self,
+				     args,
+				     &exit_status,
+				     &out,
+				     NULL,
+				     error) ||
 	    exit_status != 0) {
 		if (error != NULL && *error == NULL)
 			g_set_error(error,
@@ -508,7 +562,12 @@ fu_plugin_backup_flash(FuPlugin *self, GError **error)
 			    g_strerror(errno));
 		return FALSE;
 	}
-	if (!fu_plugin_flashrom_run(self, args, &exit_status, &out, &error_local) ||
+	if (!fu_plugin_flashrom_run(self,
+				     args,
+				     &exit_status,
+				     &out,
+				     NULL,
+				     &error_local) ||
 	    exit_status != 0) {
 		g_set_error(error,
 			    G_IO_ERROR,
@@ -737,10 +796,13 @@ fu_plugin_coldplug(FuPlugin *self, FuProgress *progress G_GNUC_UNUSED, GError **
 	fwupd_device_set_version_format(FWUPD_DEVICE(device), FWUPD_VERSION_FORMAT_NUMBER);
 	/* The version string must be set, not just version_raw: fwupd refuses
 	 * devices without a version ("no version set") and GNOME Software hides
-	 * them.  Same YYYYMMDD space as the metadata (firmware-update-check.sh
-	 * publishes release version = release_current_date), so plain numeric
-	 * comparison works and 20261015 > 20260715 as expected. */
-	fwupd_device_set_version(FWUPD_DEVICE(device), bios_date);
+	 * them.  It must be the NORMALIZED YYYYMMDD (fu_version_compare_safe
+	 * splits on '.' and g_ascii_strtoll stops at '/', so passing the raw
+	 * DMI "MM/DD/YYYY" would compare by month and rank every release newer).
+	 * Same space as the metadata (firmware-update-check.sh publishes
+	 * release version = release_current_date), so 20261015 > 20260715
+	 * compares as expected. */
+	fwupd_device_set_version(FWUPD_DEVICE(device), fu_plugin_number_to_bios_date(version));
 	fwupd_device_set_version_raw(FWUPD_DEVICE(device), version);
 	fwupd_device_add_flag(FWUPD_DEVICE(device), FWUPD_DEVICE_FLAG_UPDATABLE);
 	fwupd_device_set_install_duration(FWUPD_DEVICE(device), 60);
