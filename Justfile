@@ -171,8 +171,8 @@ rechunk $target_image=image_name $tag=default_tag:
 # splash read the stale initrd copy, regardless of the final /usr artwork).
 # So after rechunking, regenerate the initramfs once more on the finished
 # image as one derived layer, asserting the baked watermark byte-matches the
-# live /usr copy (stock fedora-logos artwork until the pixel-blue-logos RPM
-# lands; the check itself is payload-agnostic).
+# live /usr copy (the pixel-blue-logos RPM installed in build.sh owns that
+# path after the swap; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
