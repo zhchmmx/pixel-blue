@@ -2,6 +2,9 @@
 
 set -ouex pipefail
 
+# Copy the contents of system_files/ of the git repo to /
+cp -avf "/ctx/system_files"/. /
+
 ### Install packages
 
 # Packages can be installed from any enabled yum repo on the image.
@@ -18,6 +21,11 @@ dnf5 install -y git git-credential-oauth
 dnf5 install -y \
   "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
   "https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm"
+# D-Bus bindings and GSettings (PyGObject) used by the ALS auto-brightness
+# daemon (system_files/usr/bin/als-brightness-daemon.py): logind for the
+# backlight, Gio.Settings for the ambient-enabled toggle
+dnf5 install -y python3-dbus python3-gobject-base
+
 # Add Terra repo (for keyd package) and install keyd
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
@@ -73,10 +81,10 @@ dnf5 install -y waydroid waydroid-selinux
 # Upstream (fedora-silverblue) ships flatpak-add-fedora-repos.service, enabled
 # via a systemd preset. On first boot it registers the Fedora flatpak registry
 # (oci+https://registry.fedoraproject.org) plus a disabled fedora-testing
-# remote. Mask the service so those are never added.
-# The Flathub remote file is no longer overlaid from this repo: it comes back
-# with the pixel-blue-system RPM (the /usr/etc/flatpak/remotes.d copy is
-# merged to /etc/flatpak/remotes.d at deploy and read by flatpak directly).
+# remote. Mask the service so those are never added. The Flathub remote
+# shipped at system_files/etc/flatpak/remotes.d/flathub.flatpakrepo (copied to
+# /etc/flatpak/remotes.d/ at the top of this script) is registered by
+# flatpak-system-helper instead.
 # Note: this only affects fresh deployments of this image; an existing install
 # that already added the Fedora remotes keeps them under /var/lib/flatpak.
 
@@ -161,15 +169,16 @@ cp -r /tmp/alsa-ucm-conf-cros/overrides/* /usr/share/alsa/ucm2/conf.d/
 # gsettings-desktop-schemas so keyd output avoids clashing with them. The final
 # mapping table is documented in README.md (Keyboard layout).
 #
-# The keymap data (keyd config + special-keys hwdb) is no longer overlaid from
-# this repo: it will return as pixel-blue-system RPM payload, installed here
-# via dnf5 like keyd itself.
+# The keymap data lives in dedicated files under system_files/ and is installed
+# by the `cp -a /ctx/system_files` at the top of this script:
+#   system_files/etc/keyd/cros.conf                    -> /etc/keyd/cros.conf
+#   system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb -> Three-lines key -> dashboard, Assistant key -> F23
+# Edit those files directly; validate with `sudo keyd check` on a device.
 
-# Keep the hwdb compile step: RPM scriptlets cannot refresh the binary
-# database on an immutable image, so any hwdb source installed during the
-# build only reaches runtime through this (hwdb(7): only hwdb.bin is read;
-# nothing else in the build runs systemd-hwdb). The future pixel-blue-system
-# install must therefore happen above this line, or repeat it.
+# Compile the hwdb sources into the binary database udev reads at runtime
+# (hwdb(7): only the compiled database is used). At build time /usr/lib is
+# still writable, so ship the database inside the image like the immutable-image
+# setup systemd documents; nothing else in the build runs systemd-hwdb.
 systemd-hwdb update --usr
 
 # libinput quirks for keyd virtual keyboard
@@ -186,19 +195,28 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
-### GNOME defaults and user services
+### GNOME Shell default dash favorites
 #
-# The dash-favorites gschema override and the per-user services (wacom stylus
-# keyfile, ALS auto-brightness daemon with its units and D-Bus deny conf) are
-# no longer overlaid from this repo: they return with the pixel-blue-system
-# RPM. The RPM path needs no manual glib-compile-schemas here (glib2's
-# transaction file trigger recompiles when the override lands). For the user
-# units, enable them with `systemctl --global enable` again alongside the
-# package install rather than trusting %systemd_user_post + presets: scriptlet
-# enabling depends on how the RPM is written and on preset policy.
+# Pin the default apps shown on the GNOME Shell dash. The list is provided as a
+# gschema override in system_files/usr/share/glib-2.0/schemas/, which the
+# "cp -avf /ctx/system_files/. /" at the top of this script places in
+# /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to
+# take effect, so do it after all package operations.
 #
-# Note: gschema defaults only apply to users who never customized their own
-# values; they do not override an existing dconf setting.
+# Note: this only changes the default for users who never customized their own
+# favorites; it does not override a user's existing dconf value.
+
+glib-compile-schemas /usr/share/glib-2.0/schemas
+#### Enable user services
+systemctl --global enable wacom-stylus-keyfile.timer
+systemctl --global enable wacom-stylus-keyfile.service
+
+# The ALS daemon is a per-user resident service; it reads
+# org.gnome.settings-daemon.plugins.power ambient-enabled inline and pauses
+# when the toggle is off. Enabling it globally means it starts for every
+# login session, whether the toggle is on or off — daemon checks gsettings
+# each cycle and no-ops until the user turns it on.
+systemctl --global enable als-brightness.service
 
 
 ### Branding

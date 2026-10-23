@@ -78,10 +78,9 @@ ChromeOS does it — with one deliberate exception: the page keys (`Alt+↑/↓`
 are left unmapped so apps keep them (see **Alt held**). The combos follow
 the official Google shortcut list, and the
 keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
-(verified against upstream `gsettings-desktop-schemas`). The keymap data files
-(the keyd config `cros.conf` plus a udev hwdb for the Three-lines and Assistant
-keys) are not stored in this repo: they will ship as the `pixel-blue-system`
-RPM payload installed by the image build; this table is the human-readable reference.
+(verified against upstream `gsettings-desktop-schemas`). The config lives in
+`system_files/etc/keyd/cros.conf` (plus `system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb`
+for the Three-lines and Assistant keys); this table is the human-readable reference.
 
 Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
 [Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
@@ -187,10 +186,10 @@ the owner chose to keep those app shortcuts instead.
 # Modifications to the Upstream
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
-- Add keymap via [keyd](https://github.com/rvaiya/keyd). The keymap data (keyd config, hwdb) ships as the `pixel-blue-system` RPM payload, not as files in this repo.
+- Add keymap via [keyd](https://github.com/rvaiya/keyd).
 - Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
-- Improve Pixelbook Pen support (libwacom entries and the stylus keyfile helper ship in the `pixel-blue-system` RPM payload).
-- Add experimental auto brightness using the Pixelbook (eve) vendor curve (the daemon, its step table and units ship in the `pixel-blue-system` RPM payload).
+- Improve Pixelbook Pen support.
+- Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
 
 # Waydroid First-Time Setup
