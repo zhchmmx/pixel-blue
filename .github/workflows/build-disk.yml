@@ -19,6 +19,7 @@ on:
       - main
     paths:
       - 'build_files/installer-branding.tmpl'
+      - 'build_files/sidebar-logo.png'
       - 'disk_config/disk.toml'
       - 'disk_config/install_branding.tmpl'
       - 'flatpak_refs/**'

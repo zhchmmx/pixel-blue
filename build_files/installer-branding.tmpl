@@ -11,8 +11,10 @@
 # paths are overwritten: the generic /usr/share/anaconda/pixmaps/
 # sidebar-logo.png and the silverblue variant that the fedora-silverblue
 # profile's stylesheet actually selects. The image is the white symbol (the
-# sidebar renders over blue), regenerated from the SVG master by
-# build_files/export-logos.sh.
+# sidebar renders over blue), committed next to this template as
+# build_files/sidebar-logo.png. This is installer-environment art, not image
+# payload: the lorax runtime tree is composed from stock Fedora packages, so
+# the pixel-blue-logos RPM does not reach it and the PNG stays repo-side.
 #
 # runcmd is the only template command that can read from outside the
 # runtime tree: install's SRC is joined onto the inroot and stays inside
@@ -21,5 +23,5 @@
 # prefix on these lines: a missing source or destination parent must fail
 # the ISO build loudly instead of silently shipping a Fedora-branded
 # installer.
-runcmd /usr/bin/install -Dm 644 /github/workspace/system_files/usr/share/anaconda/pixmaps/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/sidebar-logo.png
-runcmd /usr/bin/install -Dm 644 /github/workspace/system_files/usr/share/anaconda/pixmaps/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/silverblue/sidebar-logo.png
+runcmd /usr/bin/install -Dm 644 /github/workspace/build_files/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/sidebar-logo.png
+runcmd /usr/bin/install -Dm 644 /github/workspace/build_files/sidebar-logo.png ${root}/usr/share/anaconda/pixmaps/silverblue/sidebar-logo.png

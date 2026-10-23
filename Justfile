@@ -166,14 +166,13 @@ rechunk $target_image=image_name $tag=default_tag:
 # Split the image for smaller updates (Classical)!
 #
 # The chunker re-exports the whole tree through an ostree commit, and the
-# initramfs that ships in the chunked image carries the *base* plymouth
-# artwork again even though build.sh overlaid and regenerated it (issue #75:
-# boot/GDM-login kept showing the Fedora logo). The overlay itself does
-# survive into the final /usr, which is why the shutdown splash (plymouthd
-# --mode=shutdown runs from the real root) was rebranded. So after
-# rechunking, re-apply the overlay + dracut on the finished image as one
-# derived layer, asserting the baked watermark byte-matches the overlay
-# source.
+# initramfs that ships in the chunked image is the base kernel-layer one
+# again even though build.sh regenerated it (issue #75: the boot/GDM-login
+# splash read the stale initrd copy, regardless of the final /usr artwork).
+# So after rechunking, regenerate the initramfs once more on the finished
+# image as one derived layer, asserting the baked watermark byte-matches the
+# live /usr copy (stock fedora-logos artwork until the pixel-blue-logos RPM
+# lands; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
@@ -197,11 +196,11 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
 
-    # Re-apply the branding overlay on the rechunked image and regenerate the
-    # initramfs, so the boot splash ships our artwork: the chunker re-export
-    # puts the base artwork back into /usr/lib/modules/<kver>/initramfs.img,
+    # Regenerate the initramfs on the rechunked image so the boot splash
+    # matches the final /usr artwork: the chunker re-export puts the base
+    # kernel-layer initrd back into /usr/lib/modules/<kver>/initramfs.img,
     # which the boot/GDM-login splash reads. The RUN also asserts that the
-    # watermark.png baked in the initrd byte-matches the overlay source, so a
+    # watermark.png baked in the initrd byte-matches the live /usr copy, so a
     # stale splash fails the build loudly. Appending a derived layer keeps the
     # chunked layering (and thus delta updates) intact.
     SPLASH_CONTAINERFILE="$(mktemp)"
@@ -210,12 +209,7 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
     printf '%s\n' \
       'ARG BASE' \
       'FROM ${BASE}' \
-      'COPY system_files /sf' \
-      'RUN --mount=type=tmpfs,dst=/tmp cp -avf /sf/usr/share/plymouth/. /usr/share/plymouth/ && \' \
-      '    cp -avf /sf/usr/share/pixmaps/. /usr/share/pixmaps/ && \' \
-      '    cp -avf /sf/usr/share/icons/hicolor/. /usr/share/icons/hicolor/ && \' \
-      '    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor && \' \
-      '    mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
+      'RUN --mount=type=tmpfs,dst=/tmp mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
       '    dracut --no-hostonly --regenerate-all --force && \' \
       '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
       '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \

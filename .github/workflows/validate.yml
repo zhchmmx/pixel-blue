@@ -18,7 +18,7 @@ defaults:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Shell: 3 scripts, discovered by shebang (no .sh extension requirement)
+  # Shell: discovered by shebang (no .sh extension requirement)
   # ---------------------------------------------------------------------------
   shell:
     name: Shell
@@ -117,7 +117,8 @@ jobs:
           }
 
   # ---------------------------------------------------------------------------
-  # Python: 1 daemon, discovered by shebang (#! ... python)
+  # Python: discovered by shebang (#! ... python); skipped when none are
+  # tracked (the daemons live in the packaging repo now)
   # ---------------------------------------------------------------------------
   python:
     name: Python
@@ -148,9 +149,10 @@ jobs:
           done < <(git ls-files)
 
           echo "discovered: python=${#py_files[@]}"
+          : > "$RUNNER_TEMP/py_files.txt"
           if [ ${#py_files[@]} -eq 0 ]; then
-            echo "::error::no python files discovered - the shebang classifier is broken"
-            exit 1
+            echo "no python files tracked (the daemons moved to the packaging repo); skipping checks"
+            exit 0
           fi
           printf '%s\n' "${py_files[@]}" > "$RUNNER_TEMP/py_files.txt"
 
@@ -159,6 +161,7 @@ jobs:
       - name: Syntax check (compile)
         run: |
           set -euo pipefail
+          [ -s "$RUNNER_TEMP/py_files.txt" ] || { echo "no python files; skipping"; exit 0; }
           mapfile -t files < "$RUNNER_TEMP/py_files.txt"
           python3 - "${files[@]}" <<'PY'
           import sys
@@ -176,10 +179,10 @@ jobs:
           sys.exit(rc)
           PY
 
-      # E501 stays meaningful because the daemon's longest line is 105 chars.
       - name: ruff check
         run: |
           set -euo pipefail
+          [ -s "$RUNNER_TEMP/py_files.txt" ] || { echo "no python files; skipping"; exit 0; }
           mapfile -t files < "$RUNNER_TEMP/py_files.txt"
           ruff --isolated check --no-cache \
             --target-version py310 --line-length 120 \
@@ -190,6 +193,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          [ -s "$RUNNER_TEMP/py_files.txt" ] || { echo "no python files; skipping"; exit 0; }
           mapfile -t files < "$RUNNER_TEMP/py_files.txt"
           ruff --isolated format --check --diff \
             --line-length 120 "${files[@]}" || {
@@ -227,7 +231,7 @@ jobs:
           import tomllib
           import xml.etree.ElementTree as ET
 
-          UNIT_PREFIX = 'system_files/usr/lib/systemd/'
+          UNIT_MARK = '/usr/lib/systemd/'
           UNIT_SUFFIXES = ('.service', '.timer')
           REFS_PREFIX = 'flatpak_refs/'
           TIMER_TRIGGERS = (
@@ -308,7 +312,7 @@ jobs:
                       continue
 
                   problems = []
-                  if rel.startswith(UNIT_PREFIX) and path.suffix in UNIT_SUFFIXES:
+                  if UNIT_MARK in rel and path.suffix in UNIT_SUFFIXES:
                       counts['unit'] += 1
                       problems = check_unit(rel, text)
                   elif path.suffix == '.toml':
@@ -343,10 +347,16 @@ jobs:
                       print('ok: ' + rel)
 
               print('classified: ' + ' '.join('%s=%d' % item for item in counts.items()))
+              # toml is the one class this repo always keeps (disk_config/disk.toml);
+              # its absence means the classifier regressed. The other buckets went
+              # with the payload that moved to the packaging repo, so zero counts
+              # there are informational only.
+              if counts['toml'] == 0:
+                  print('::error::no toml files discovered - the classifier is broken')
+                  failures += 1
               for name, value in counts.items():
-                  if value == 0:
-                      print('::error::no %s files discovered - the classifier is broken' % name)
-                      failures += 1
+                  if value == 0 and name != 'toml':
+                      print('note: no %s files tracked' % name)
               return 1 if failures else 0
 
 
@@ -397,11 +407,10 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
-          shopt -s nullglob
-          units=(system_files/usr/lib/systemd/user/*.service system_files/usr/lib/systemd/user/*.timer)
+          mapfile -t units < <(git ls-files | grep -E '(^|/)systemd/user/[^/]+\.(service|timer)$')
           if [ ${#units[@]} -eq 0 ]; then
-            echo "::error::no systemd user units found"
-            exit 1
+            echo "no systemd user units tracked (they moved to the packaging repo); skipping"
+            exit 0
           fi
           rc=0
           for u in "${units[@]}"; do
