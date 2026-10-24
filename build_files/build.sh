@@ -227,43 +227,6 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
-### System updates: rpm-ostree auto-staging for GNOME Software
-#
-# GNOME Software ships its own rpm-ostree plugin (it activates whenever
-# /run/ostree-booted exists, which it does on this Silverblue-based
-# image); no third-party PackageKit backend is involved, and the
-# PackageKit-bootc experiment from #73 is reverted — its upstream
-# self-describes as a deprecated temporary hack and it never activated
-# here anyway.
-#
-# The plugin reads the rpm-ostreed daemon over D-Bus: a check shows up as
-# listed updates (with per-package diffs and security urgency), and a
-# STAGED deployment shows up as the "restart to update" prompt (the shell
-# power menu picks the same staged deployment up as "Update and Restart").
-# Making that loop run by itself takes the two pieces rpm-ostreed.conf(5)
-# documents:
-#   1. /etc/rpm-ostreed.conf — shipped at system_files/etc/rpm-ostreed.conf
-#      and copied to /etc by the cp at the top of this script; the rechunk
-#      step's container commit moves it to /usr/etc, from where deployment
-#      seeds /etc. It sets AutomaticUpdatePolicy=stage (the automatic
-#      trigger downloads and stages the new image for next boot instead of
-#      merely checking) and LockLayering=true (runtime layering/overrides
-#      rejected, so staged image updates cannot fail on layered-package
-#      depsolve; hosts that carried layers before the lock are refused by
-#      it until the layers go — see system_files/etc/rpm-ostreed.conf).
-#   2. this timer — rpm-ostree ships rpm-ostreed-automatic.{service,timer}
-#      disabled; it runs
-#      `rpm-ostree upgrade --quiet --trigger-automatic-update-policy` one hour
-#      after boot, then one day after each run, and catches up a missed
-#      interval on next boot (OnBootSec=1h, OnUnitInactiveSec=1d,
-#      Persistent=true).
-#
-# The plugin is a separate Fedora package (subpackage of gnome-software,
-# pulled into the Silverblue image via Supplements). Assert it is present,
-# so a base that ever drops it fails the build loudly instead of shipping
-# a silently dead update UI:
-rpm -q gnome-software-rpm-ostree
-systemctl enable rpm-ostreed-automatic.timer
 
 ### GNOME Shell default dash favorites
 #
