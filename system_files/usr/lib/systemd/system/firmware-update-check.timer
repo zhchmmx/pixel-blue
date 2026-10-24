@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly MrChromebox UEFI firmware update check
+
+[Timer]
+OnBootSec=5min
+OnCalendar=weekly
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

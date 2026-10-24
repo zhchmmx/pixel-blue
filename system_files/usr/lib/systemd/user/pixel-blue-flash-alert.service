@@ -1,0 +1,16 @@
+[Unit]
+Description=Notify the user of a failed firmware flash
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+ExecStart=/usr/libexec/pixel-blue-flash-alert.py
+TimeoutStartSec=infinity
+# missing this alert can mean a bricked machine, so a transient failure
+# (e.g. a session-bus race) must not end it; oneshot honours Restart=on-failure
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

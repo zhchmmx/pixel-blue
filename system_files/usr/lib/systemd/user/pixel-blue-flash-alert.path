@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for a failed firmware flash marker
+
+[Path]
+PathExists=/var/lib/pixel-blue/fwupd/flash-failed
+
+[Install]
+WantedBy=default.target

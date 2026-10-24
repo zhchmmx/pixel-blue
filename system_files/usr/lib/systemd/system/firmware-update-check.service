@@ -1,0 +1,13 @@
+[Unit]
+Description=Check MrChromebox UEFI firmware updates
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/firmware-update-check.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
