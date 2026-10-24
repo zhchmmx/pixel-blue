@@ -226,16 +226,27 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
-### GNOME Shell default dash favorites
+### GNOME Shell default dash favorites and enabled extensions
 #
-# Pin the default apps shown on the GNOME Shell dash. The list is provided as a
-# gschema override in system_files/usr/share/glib-2.0/schemas/, which the
-# "cp -avf /ctx/system_files/. /" at the top of this script places in
+# Both are pinned in
+# system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override,
+# which the "cp -avf /ctx/system_files/. /" at the top of this script places in
 # /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to
 # take effect, so do it after all package operations.
 #
+# The tablet-mode keyboard backlight extension (issue #72) ships its payload in
+# system_files/usr/share/gnome-shell/extensions/. System extensions are loaded
+# but stay disabled until their uuid appears in org.gnome.shell
+# enabled-extensions, so the override states that key in full: override files
+# replace whole keys and the zz0-* file sorts last, so it wins over Fedora's
+# org.gnome.shell.gschema.override (fedora-release-identity-silverblue) instead
+# of merging with it. Fedora's F44 value only lists
+# background-logo@fedorahosted.org, the extension removed above, so there is
+# nothing to inherit; following a future Fedora addition is a deliberate edit
+# in that file, not build-time detection.
+#
 # Note: this only changes the default for users who never customized their own
-# favorites; it does not override a user's existing dconf value.
+# favorites or extensions; it does not override a user's existing dconf value.
 
 glib-compile-schemas /usr/share/glib-2.0/schemas
 #### Enable user services
