@@ -15,8 +15,9 @@ set -ouex pipefail
 # fedora-$releasever-$basearch chroot matching this base) fails HERE, loudly.
 # -y is load-bearing: without it the plugin's third-party-repo confirmation
 # reads empty stdin in the build container and silently exits 0 without
-# writing the repo file. Like the RPM Fusion/Terra repos above, the repo file
-# is baked into /etc. Hosts never consult it at runtime for layering though:
+# writing the repo file. Like the RPM Fusion/Terra repos in 05-repos.sh, the
+# repo file is baked into /etc. Hosts never consult it at runtime for
+# layering though:
 # LockLayering=true rejects rpm-ostree install (see
 # system_files/etc/rpm-ostreed.conf), and bootc upgrades pull OCI images,
 # never packages, so the image's own content is not updateable from Copr.
