@@ -248,12 +248,15 @@ systemctl enable podman.socket
 #      seeds /etc. It sets AutomaticUpdatePolicy=stage (the automatic
 #      trigger downloads and stages the new image for next boot instead of
 #      merely checking) and LockLayering=true (runtime layering/overrides
-#      rejected, so staged image updates can never fail on layered-package
-#      depsolve).
+#      rejected, so staged image updates cannot fail on layered-package
+#      depsolve; hosts that carried layers before the lock are refused by
+#      it until the layers go — see system_files/etc/rpm-ostreed.conf).
 #   2. this timer — rpm-ostree ships rpm-ostreed-automatic.{service,timer}
-#      un-enabled; the timer runs
-#      `rpm-ostree upgrade --trigger-automatic-update-policy` one hour
-#      after boot and daily thereafter.
+#      disabled; it runs
+#      `rpm-ostree upgrade --quiet --trigger-automatic-update-policy` one hour
+#      after boot, then one day after each run, and catches up a missed
+#      interval on next boot (OnBootSec=1h, OnUnitInactiveSec=1d,
+#      Persistent=true).
 #
 # The plugin is a separate Fedora package (subpackage of gnome-software,
 # pulled into the Silverblue image via Supplements). Assert it is present,
