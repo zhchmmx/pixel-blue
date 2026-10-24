@@ -37,13 +37,15 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing
 
 ### Pinning to a specific build
 
-Every build is also published with a commit-based tag, so you can freeze to an exact build:
+Every build is also published with a version tag, so you can freeze to an exact build:
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit>
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 ```
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
+The tag is `<UTC build date>.<GitHub Actions run number>` (for example `20261024.42`) and contains neither the branch name nor the commit hash. Take the number from the workflow run that built the image; the commit is recorded in the image's `org.opencontainers.image.revision` label.
+
+After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a version tag will not receive updates until they switch back to a channel.
 
 > For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
 
