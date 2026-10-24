@@ -37,13 +37,15 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing
 
 ### Pinning to a specific build
 
-Every build is also published with a commit-based tag, so you can freeze to an exact build:
+Every build is also published with a version tag, so you can freeze to an exact build:
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit>
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 ```
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
+The tag is `<UTC build date>.<GitHub Actions run number>` (for example `20261024.42`) and contains neither the branch name nor the commit hash. Take the number from the workflow run that built the image; the commit is recorded in the image's `org.opencontainers.image.revision` label.
+
+After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a version tag will not receive updates until they switch back to a channel.
 
 > For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
 
@@ -190,6 +192,7 @@ the owner chose to keep those app shortcuts instead.
 - Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
+- Tablet-mode keyboard backlight (issue #72): folding the Pixelbook into tablet mode turns the keyboard backlight off and hides the quick-settings "Keyboard" item; unfolding restores the previous level (ChromeOS powerd semantics). Implemented by the vendored GNOME Shell extension in `system_files/usr/share/gnome-shell/extensions/tablet-kbd-backlight@zhchmmx.github.io/`, enabled through `enabled-extensions` in `system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override`.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
 
 # Waydroid First-Time Setup

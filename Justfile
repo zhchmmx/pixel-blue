@@ -83,8 +83,11 @@ sudoif command *args:
 #   $target_image - The tag you want to apply to the image (default: $image_name).
 #   $tag - The tag for the image (default: $default_tag).
 #
-# The script constructs the version string using the tag and the current date.
-# If the git working directory is clean, it also includes the short SHA of the current HEAD.
+# The script sets the version label to <UTC date>.<build number> (for example
+# 20261024.42). In CI that build number is the GitHub Actions run number; local
+# builds fall back to BUILD_NUMBER or the commit count. The version carries no
+# branch name or commit hash; the commit is recorded separately in
+# org.opencontainers.image.revision.
 #
 # just build $target_image $tag
 #
@@ -100,6 +103,8 @@ build $target_image=image_name $tag=default_tag:
 
     set -euox pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -107,7 +112,8 @@ build $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
         LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
-        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
     fi
 
     # Image metadata for https://artifacthub.io/ - This is optional but is highly recommended so we all can get a index of all the custom images
@@ -167,16 +173,18 @@ rechunk $target_image=image_name $tag=default_tag:
 #
 # The chunker re-exports the whole tree through an ostree commit, and the
 # initramfs that ships in the chunked image is the base kernel-layer one
-# again even though build.sh regenerated it (issue #75: the boot/GDM-login
+# again even though 60-branding-dracut.sh regenerated it (issue #75: the boot/GDM-login
 # splash read the stale initrd copy, regardless of the final /usr artwork).
 # So after rechunking, regenerate the initramfs once more on the finished
 # image as one derived layer, asserting the baked watermark byte-matches the
-# live /usr copy (the pixel-blue-logos RPM installed in build.sh owns that
+# live /usr copy (the pixel-blue-logos RPM installed in 10-logos.sh owns that
 # path after the swap; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
     set -xeuo pipefail
+
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
 
     # Use the already-built local image to avoid pulling from a remote registry
     RPM_OSTREE_CHUNKER_IMAGE="localhost/${target_image}:${tag}"
@@ -209,6 +217,33 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
     # --add ostree is required for a bootable bootc initrd (it provides
     # ostree-prepare-root, which prepares /sysroot before switch-root); the
     # RUN asserts it landed so a bad initrd fails here, not at boot.
+    # Re-apply build metadata labels on the FINAL image. The chunker
+    # (rpm-ostree compose build-chunked-oci) re-exports the image from the
+    # ostree commit and does NOT carry over the config labels set by
+    # `just build` (org.opencontainers.image.*, io.artifacthub.package.*),
+    # so they must be re-stamped here or the pushed image loses them all
+    # (observed on GHCR: version label was null). Mirrors the logic in the
+    # build recipe verbatim, including the clean-working-tree condition.
+    LABELS=()
+    if [[ -z "$(git status -s)" ]]; then
+        GIT_SHA=$(git rev-parse --short HEAD)
+        LABELS+=("--label" "io.artifacthub.package.readme-url=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
+        LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
+    fi
+    LABELS+=("--label" "io.artifacthub.package.deprecated=false")
+    LABELS+=("--label" "io.artifacthub.package.keywords={{ image_keywords }}")
+    LABELS+=("--label" "io.artifacthub.package.license=Apache-2.0")
+    LABELS+=("--label" "io.artifacthub.package.logo-url={{ image_logo_url }}")
+    LABELS+=("--label" "io.artifacthub.package.prerelease=false")
+    LABELS+=("--label" "org.opencontainers.image.created=$(date -u +%Y\-%m\-%d\T%H\:%M\:%S\Z)")
+    LABELS+=("--label" "org.opencontainers.image.description={{ image_desc }}")
+    LABELS+=("--label" "org.opencontainers.image.title={{ image_name }}")
+    LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
+
     SPLASH_CONTAINERFILE="$(mktemp)"
     # (written with printf, not a heredoc: `just --fmt` requires every recipe
     # line to be indented, which a terminating heredoc marker cannot be)
@@ -239,6 +274,7 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       '    [ "$ok" = 1 ]' \
       > "${SPLASH_CONTAINERFILE}"
     podman build --pull=never --layers \
+      "${LABELS[@]}" \
       --build-arg BASE="localhost/${target_image}:${tag}" \
       --tag "${target_image}:${tag}" \
       --file "${SPLASH_CONTAINERFILE}" .
@@ -258,12 +294,13 @@ generate-build-tags $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
     set -eoux pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     BUILD_TAGS=()
 
-    # Commit-based pin tag, used to freeze a specific build
+    # Version-based pin tag, used to freeze a specific build
     if [[ -z "$(git status -s)" ]]; then
-        GIT_SHA=$(git rev-parse --short HEAD)
-        BUILD_TAGS+=("${tag}-${GIT_SHA}")
+        BUILD_TAGS+=("${IMAGE_VERSION}")
     fi
 
     # Moving channel tag (latest or testing)
