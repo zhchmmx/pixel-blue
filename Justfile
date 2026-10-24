@@ -202,7 +202,10 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
     # which the boot/GDM-login splash reads. The RUN also asserts that the
     # watermark.png baked in the initrd byte-matches the live /usr copy, so a
     # stale splash fails the build loudly. Appending a derived layer keeps the
-    # chunked layering (and thus delta updates) intact.
+    # chunked layering (and thus delta updates) intact. dracut is called with
+    # the kernel version and the output path spelled out, because in a
+    # container it would otherwise default to /boot/initramfs-$kver.img and
+    # leave the image's /usr/lib/modules/<kver>/initramfs.img untouched.
     SPLASH_CONTAINERFILE="$(mktemp)"
     # (written with printf, not a heredoc: `just --fmt` requires every recipe
     # line to be indented, which a terminating heredoc marker cannot be)
@@ -210,7 +213,11 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       'ARG BASE' \
       'FROM ${BASE}' \
       'RUN --mount=type=tmpfs,dst=/tmp mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
-      '    dracut --no-hostonly --regenerate-all --force && \' \
+      '    for kdir in /usr/lib/modules/*; do \' \
+      '        [ -f "$kdir/modules.dep" ] || continue; \' \
+      '        dracut --no-hostonly --force "$kdir/initramfs.img" "$(basename "$kdir")" || exit 1; \' \
+      '        chmod 0600 "$kdir/initramfs.img"; \' \
+      '    done && \' \
       '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
       '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \
       '    ok=0 && \' \

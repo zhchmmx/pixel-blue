@@ -293,12 +293,23 @@ fi
 # docs.fedoraproject.org/en-US/bootc/initramfs/). --no-hostonly keeps the
 # initrd generic (hardware detection inside the build container would
 # otherwise bake in the CI runner's devices).
+# Name the kernel *and* the output file. In a container dracut defaults to
+# /boot/initramfs-$kver.img, but bootc boots the image's
+# /usr/lib/modules/$kver/initramfs.img, so a bare --regenerate-all leaves the
+# image's initrd untouched (that is what issue #75's stale boot splash was).
+# Same target-selection as ublue-os/bazzite's build_files/build-initramfs and
+# ublue-os/bluefin's 19-initramfs.sh; chmod 600 matches how those images ship
+# the initrd.
 # /root is a symlink to /var/roothome on bootc bases and the target does not
 # exist in the build container yet; dracut-install aborts on it ("ERROR:
 # installing '/root'"), so create it first (empty; systemd-tmpfiles owns the
 # real directory at runtime).
 mkdir -p /var/roothome && chmod 700 /var/roothome
-dracut --no-hostonly --regenerate-all --force
+for kdir in /usr/lib/modules/*; do
+  [ -f "$kdir/modules.dep" ] || continue
+  dracut --no-hostonly --force "$kdir/initramfs.img" "$(basename "$kdir")"
+  chmod 0600 "$kdir/initramfs.img"
+done
 # Assert it landed *by content*: the stock fedora-logos watermark lives at
 # the same path, so a bare path grep in lsinitrd would also pass for a
 # freshly-exported-but-unrebranded initrd (this is exactly how issue #75's
