@@ -30,6 +30,7 @@ dnf5 install -y python3-dbus python3-gobject-base
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
+dnf5 install -y PackageKit-bootc
 
 ### Pixel Blue branding RPM (pixel-blue-logos)
 #
