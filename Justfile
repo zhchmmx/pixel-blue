@@ -209,6 +209,32 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
     # --add ostree is required for a bootable bootc initrd (it provides
     # ostree-prepare-root, which prepares /sysroot before switch-root); the
     # RUN asserts it landed so a bad initrd fails here, not at boot.
+    # Re-apply build metadata labels on the FINAL image. The chunker
+    # (rpm-ostree compose build-chunked-oci) re-exports the image from the
+    # ostree commit and does NOT carry over the config labels set by
+    # `just build` (org.opencontainers.image.*, io.artifacthub.package.*),
+    # so they must be re-stamped here or the pushed image loses them all
+    # (observed on GHCR: version label was null). Mirrors the logic in the
+    # build recipe verbatim, including the clean-working-tree condition.
+    LABELS=()
+    if [[ -z "$(git status -s)" ]]; then
+        GIT_SHA=$(git rev-parse --short HEAD)
+        LABELS+=("--label" "io.artifacthub.package.readme-url=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
+        LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+    fi
+    LABELS+=("--label" "io.artifacthub.package.deprecated=false")
+    LABELS+=("--label" "io.artifacthub.package.keywords={{ image_keywords }}")
+    LABELS+=("--label" "io.artifacthub.package.license=Apache-2.0")
+    LABELS+=("--label" "io.artifacthub.package.logo-url={{ image_logo_url }}")
+    LABELS+=("--label" "io.artifacthub.package.prerelease=false")
+    LABELS+=("--label" "org.opencontainers.image.created=$(date -u +%Y\-%m\-%d\T%H\:%M\:%S\Z)")
+    LABELS+=("--label" "org.opencontainers.image.description={{ image_desc }}")
+    LABELS+=("--label" "org.opencontainers.image.title={{ image_name }}")
+    LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
+
     SPLASH_CONTAINERFILE="$(mktemp)"
     # (written with printf, not a heredoc: `just --fmt` requires every recipe
     # line to be indented, which a terminating heredoc marker cannot be)
@@ -239,6 +265,7 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       '    [ "$ok" = 1 ]' \
       > "${SPLASH_CONTAINERFILE}"
     podman build --pull=never --layers \
+      "${LABELS[@]}" \
       --build-arg BASE="localhost/${target_image}:${tag}" \
       --tag "${target_image}:${tag}" \
       --file "${SPLASH_CONTAINERFILE}" .

@@ -30,7 +30,6 @@ dnf5 install -y python3-dbus python3-gobject-base
 # Pixelbook (eve) keyboard mapping requires keyd
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd
-dnf5 install -y PackageKit-bootc
 
 ### Pixel Blue branding RPM (pixel-blue-logos)
 #
@@ -47,9 +46,10 @@ dnf5 install -y PackageKit-bootc
 # -y is load-bearing: without it the plugin's third-party-repo confirmation
 # reads empty stdin in the build container and silently exits 0 without
 # writing the repo file. Like the RPM Fusion/Terra repos above, the repo file
-# is baked into /etc and stays live on deployed hosts for runtime layering
-# (bootc upgrades pull OCI images, never packages, so the image's own content
-# is not updateable from Copr).
+# is baked into /etc. Hosts never consult it at runtime for layering though:
+# LockLayering=true rejects rpm-ostree install (see
+# system_files/etc/rpm-ostreed.conf), and bootc upgrades pull OCI images,
+# never packages, so the image's own content is not updateable from Copr.
 dnf5 install -y dnf5-plugins
 dnf5 copr enable -y zhchmmx/pixel-blue-logos
 # A plain install would fail on the package's Conflicts: fedora-logos (the
@@ -126,8 +126,9 @@ ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
 # Upstream ships Firefox as an RPM (firefox + firefox-langpacks) baked into
 # the base ostree commit and installed into read-only /usr, where it cannot
 # be removed at runtime. Drop both packages from the image. Firefox stays
-# available to users via Flathub (flatpak install flathub org.mozilla.firefox)
-# or rpm-ostree/bootc layering.
+# available to users via Flathub (flatpak install flathub org.mozilla.firefox);
+# runtime rpm-ostree layering is rejected on this image (LockLayering=true,
+# see the rpm-ostreed section below and system_files/etc/rpm-ostreed.conf).
 
 dnf5 remove -y firefox firefox-langpacks
 dnf5 remove -y gnome-shell-extension-background-logo
@@ -226,7 +227,8 @@ EOF
 systemctl enable keyd
 systemctl enable podman.socket
 
-### GNOME Shell default dash favorites and enabled extensions
+
+### GNOME Shell default dash favorites
 #
 # Both are pinned in
 # system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override,
