@@ -206,6 +206,9 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
     # the kernel version and the output path spelled out, because in a
     # container it would otherwise default to /boot/initramfs-$kver.img and
     # leave the image's /usr/lib/modules/<kver>/initramfs.img untouched.
+    # --add ostree is required for a bootable bootc initrd (it provides
+    # ostree-prepare-root, which prepares /sysroot before switch-root); the
+    # RUN asserts it landed so a bad initrd fails here, not at boot.
     SPLASH_CONTAINERFILE="$(mktemp)"
     # (written with printf, not a heredoc: `just --fmt` requires every recipe
     # line to be indented, which a terminating heredoc marker cannot be)
@@ -215,8 +218,10 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       'RUN --mount=type=tmpfs,dst=/tmp mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
       '    for kdir in /usr/lib/modules/*; do \' \
       '        [ -f "$kdir/modules.dep" ] || continue; \' \
-      '        dracut --no-hostonly --force "$kdir/initramfs.img" "$(basename "$kdir")" || exit 1; \' \
+      '        dracut --no-hostonly --add ostree --force "$kdir/initramfs.img" "$(basename "$kdir")" || exit 1; \' \
       '        chmod 0600 "$kdir/initramfs.img"; \' \
+      '        lsinitrd "$kdir/initramfs.img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "usr/lib/ostree/ostree-prepare-root" /tmp/lsinitrd.list || exit 1; \' \
       '    done && \' \
       '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
       '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \
