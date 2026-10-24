@@ -190,6 +190,7 @@ the owner chose to keep those app shortcuts instead.
 - Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
+- Tablet-mode keyboard backlight (issue #72): folding the Pixelbook into tablet mode turns the keyboard backlight off and hides the quick-settings "Keyboard" item; unfolding restores the previous level (ChromeOS powerd semantics). Implemented by the vendored GNOME Shell extension in `system_files/usr/share/gnome-shell/extensions/tablet-kbd-backlight@zhchmmx.github.io/`, enabled through `enabled-extensions` in `system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override`.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
 
 # Waydroid First-Time Setup
