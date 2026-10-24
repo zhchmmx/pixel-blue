@@ -167,11 +167,11 @@ rechunk $target_image=image_name $tag=default_tag:
 #
 # The chunker re-exports the whole tree through an ostree commit, and the
 # initramfs that ships in the chunked image is the base kernel-layer one
-# again even though build.sh regenerated it (issue #75: the boot/GDM-login
+# again even though 60-branding-dracut.sh regenerated it (issue #75: the boot/GDM-login
 # splash read the stale initrd copy, regardless of the final /usr artwork).
 # So after rechunking, regenerate the initramfs once more on the finished
 # image as one derived layer, asserting the baked watermark byte-matches the
-# live /usr copy (the pixel-blue-logos RPM installed in build.sh owns that
+# live /usr copy (the pixel-blue-logos RPM installed in 10-logos.sh owns that
 # path after the swap; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
