@@ -300,6 +300,12 @@ fi
 # Same target-selection as ublue-os/bazzite's build_files/build-initramfs and
 # ublue-os/bluefin's 19-initramfs.sh; chmod 600 matches how those images ship
 # the initrd.
+# --add ostree is load-bearing: bootc/ostree images switch root through
+# /usr/lib/ostree/ostree-prepare-root, which prepares /sysroot from the
+# deployment. Fedora's dracut config does not include the ostree module by
+# default (and --no-hostonly does not either), so a regenerated initrd without
+# it boots into "The switch root path does not appear to be an OS tree.
+# /usr is missing." and panics. Every ublue image adds it explicitly too.
 # /root is a symlink to /var/roothome on bootc bases and the target does not
 # exist in the build container yet; dracut-install aborts on it ("ERROR:
 # installing '/root'"), so create it first (empty; systemd-tmpfiles owns the
@@ -307,8 +313,17 @@ fi
 mkdir -p /var/roothome && chmod 700 /var/roothome
 for kdir in /usr/lib/modules/*; do
   [ -f "$kdir/modules.dep" ] || continue
-  dracut --no-hostonly --force "$kdir/initramfs.img" "$(basename "$kdir")"
+  dracut --no-hostonly --add ostree --force "$kdir/initramfs.img" "$(basename "$kdir")"
   chmod 0600 "$kdir/initramfs.img"
+  # Guard the failure that shipped once: an initrd without the ostree module
+  # builds green but panics at switch-root ("/usr is missing"). Assert by
+  # content so a silently dropped module fails the build here instead of
+  # bricking an update.
+  lsinitrd "$kdir/initramfs.img" > /tmp/lsinitrd.list 2>/dev/null
+  if ! grep -q 'usr/lib/ostree/ostree-prepare-root' /tmp/lsinitrd.list; then
+    echo "error: ostree module missing from $kdir/initramfs.img" >&2
+    exit 1
+  fi
 done
 # Assert it landed *by content*: the stock fedora-logos watermark lives at
 # the same path, so a bare path grep in lsinitrd would also pass for a
