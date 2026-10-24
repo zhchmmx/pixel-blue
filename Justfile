@@ -83,8 +83,11 @@ sudoif command *args:
 #   $target_image - The tag you want to apply to the image (default: $image_name).
 #   $tag - The tag for the image (default: $default_tag).
 #
-# The script constructs the version string using the tag and the current date.
-# If the git working directory is clean, it also includes the short SHA of the current HEAD.
+# The script sets the version label to <UTC date>.<build number> (for example
+# 20261024.42). In CI that build number is the GitHub Actions run number; local
+# builds fall back to BUILD_NUMBER or the commit count. The version carries no
+# branch name or commit hash; the commit is recorded separately in
+# org.opencontainers.image.revision.
 #
 # just build $target_image $tag
 #
@@ -100,6 +103,8 @@ build $target_image=image_name $tag=default_tag:
 
     set -euox pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -107,7 +112,8 @@ build $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
         LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
-        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
     fi
 
     # Image metadata for https://artifacthub.io/ - This is optional but is highly recommended so we all can get a index of all the custom images
@@ -178,6 +184,8 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
 
     set -xeuo pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     # Use the already-built local image to avoid pulling from a remote registry
     RPM_OSTREE_CHUNKER_IMAGE="localhost/${target_image}:${tag}"
 
@@ -223,7 +231,8 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
         LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
-        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
     fi
     LABELS+=("--label" "io.artifacthub.package.deprecated=false")
     LABELS+=("--label" "io.artifacthub.package.keywords={{ image_keywords }}")
@@ -285,12 +294,13 @@ generate-build-tags $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
     set -eoux pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     BUILD_TAGS=()
 
-    # Commit-based pin tag, used to freeze a specific build
+    # Version-based pin tag, used to freeze a specific build
     if [[ -z "$(git status -s)" ]]; then
-        GIT_SHA=$(git rev-parse --short HEAD)
-        BUILD_TAGS+=("${tag}-${GIT_SHA}")
+        BUILD_TAGS+=("${IMAGE_VERSION}")
     fi
 
     # Moving channel tag (latest or testing)
