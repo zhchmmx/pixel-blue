@@ -164,6 +164,15 @@ rechunk $target_image=image_name $tag=default_tag:
     podman tag "${CHUNKED_IMAGE}" "${target_image}:${tag}"
 
 # Split the image for smaller updates (Classical)!
+#
+# The chunker re-exports the whole tree through an ostree commit, and the
+# initramfs that ships in the chunked image is the base kernel-layer one
+# again even though build.sh regenerated it (issue #75: the boot/GDM-login
+# splash read the stale initrd copy, regardless of the final /usr artwork).
+# So after rechunking, regenerate the initramfs once more on the finished
+# image as one derived layer, asserting the baked watermark byte-matches the
+# live /usr copy (the pixel-blue-logos RPM installed in build.sh owns that
+# path after the swap; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
@@ -186,6 +195,54 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --bootc \
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
+
+    # Regenerate the initramfs on the rechunked image so the boot splash
+    # matches the final /usr artwork: the chunker re-export puts the base
+    # kernel-layer initrd back into /usr/lib/modules/<kver>/initramfs.img,
+    # which the boot/GDM-login splash reads. The RUN also asserts that the
+    # watermark.png baked in the initrd byte-matches the live /usr copy, so a
+    # stale splash fails the build loudly. Appending a derived layer keeps the
+    # chunked layering (and thus delta updates) intact. dracut is called with
+    # the kernel version and the output path spelled out, because in a
+    # container it would otherwise default to /boot/initramfs-$kver.img and
+    # leave the image's /usr/lib/modules/<kver>/initramfs.img untouched.
+    # --add ostree is required for a bootable bootc initrd (it provides
+    # ostree-prepare-root, which prepares /sysroot before switch-root); the
+    # RUN asserts it landed so a bad initrd fails here, not at boot.
+    SPLASH_CONTAINERFILE="$(mktemp)"
+    # (written with printf, not a heredoc: `just --fmt` requires every recipe
+    # line to be indented, which a terminating heredoc marker cannot be)
+    printf '%s\n' \
+      'ARG BASE' \
+      'FROM ${BASE}' \
+      'RUN --mount=type=tmpfs,dst=/tmp mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
+      '    for kdir in /usr/lib/modules/*; do \' \
+      '        [ -f "$kdir/modules.dep" ] || continue; \' \
+      '        dracut --no-hostonly --add ostree --force "$kdir/initramfs.img" "$(basename "$kdir")" || exit 1; \' \
+      '        chmod 0600 "$kdir/initramfs.img"; \' \
+      '        lsinitrd "$kdir/initramfs.img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "usr/lib/ostree/ostree-prepare-root" /tmp/lsinitrd.list || exit 1; \' \
+      '    done && \' \
+      '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
+      '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \
+      '    ok=0 && \' \
+      '    for img in /usr/lib/modules/*/initramfs.img; do \' \
+      '        lsinitrd "$img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "themes/spinner/watermark.png" /tmp/lsinitrd.list || continue; \' \
+      '        lsinitrd -f "$wm" "$img" > /tmp/wm_baked.png; \' \
+      '        got=$(sha256sum /tmp/wm_baked.png | cut -d" " -f1); \' \
+      '        [ "$got" = "$want" ] && ok=1; \' \
+      '    done; \' \
+      '    if [ "$ok" != 1 ]; then echo "plymouth theme files in initrd:"; \' \
+      '        for img in /usr/lib/modules/*/initramfs.img; do lsinitrd "$img" | grep "themes/"; done; \' \
+      '        exit 1; fi; \' \
+      '    [ "$ok" = 1 ]' \
+      > "${SPLASH_CONTAINERFILE}"
+    podman build --pull=never --layers \
+      --build-arg BASE="localhost/${target_image}:${tag}" \
+      --tag "${target_image}:${tag}" \
+      --file "${SPLASH_CONTAINERFILE}" .
+    rm -f "${SPLASH_CONTAINERFILE}"
 
 # Generate Default Tag
 [group('Utility')]
@@ -356,6 +413,12 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 #   - uses Anaconda's fedora-silverblue profile (VARIANT=Silverblue): the
 #     installer only asks for the destination, and account/timezone setup
 #     happens in gnome-initial-setup on first boot, like the official Fedora ISO
+#   - brands the installer environment itself via two lorax templates passed
+#     to ADDITIONAL_TEMPLATES space-delimited:
+#     disk_config/install_branding.tmpl (os-release + .buildstamp) and
+#     build_files/installer-branding.tmpl (the sidebar logo). The repo is
+#     mounted at /github/workspace, so the templates and their source PNG
+#     are addressed by their in-container paths
 #
 # Keep the jasonn3 image tag in sync with the SHA pinned for
 # jasonn3/build-container-installer in .github/workflows/build-disk.yml.
@@ -383,6 +446,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="4
       IMAGE_TAG="{{ tag }}" \
       VERSION="{{ version }}" \
       VARIANT="Silverblue" \
+      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl /github/workspace/build_files/installer-branding.tmpl" \
       FLATPAK_REMOTE_NAME="flathub" \
       FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
       FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \
