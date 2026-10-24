@@ -236,7 +236,57 @@ systemctl enable podman.socket
 # Note: this only changes the default for users who never customized their own
 # favorites; it does not override a user's existing dconf value.
 
-glib-compile-schemas /usr/share/glib-2.0/schemas
+### GNOME Shell extension: tablet-mode keyboard backlight (issue #72)
+#
+# The vendored extension payload lives in
+# system_files/usr/share/gnome-shell/extensions/ and is placed under
+# /usr/share by the "cp -avf /ctx/system_files/. /" at the top of this script.
+# System extensions are loaded but stay disabled until their uuid appears in
+# org.gnome.shell enabled-extensions, so that key must carry our uuid.
+#
+# Override files write whole keys and glib-compile-schemas applies them in
+# sorted-filename order, last write winning, so our zz0-* file does not just
+# ADD to the list Fedora's org.gnome.shell.gschema.override
+# (fedora-release-identity-silverblue) already sets (dash-to-dock): whatever
+# the key says in ours is all there is. Read the value this base image ships
+# and append our uuid to it rather than hardcoding Fedora's list.
+
+ext_uuid='tablet-kbd-backlight@zhchmmx.github.io'
+schema_dir=/usr/share/glib-2.0/schemas
+ours_override="$schema_dir/zz0-pixel-blue-modifications.gschema.override"
+fed_override="$schema_dir/org.gnome.shell.gschema.override"
+
+if [ ! -f "$ours_override" ]; then
+  echo "error: $ours_override not installed from system_files/" >&2
+  exit 1
+fi
+
+fed_enabled=''
+if [ -f "$fed_override" ]; then
+  # tr strips any spacing inside the GVariant array (separators are optional)
+  # and shields the insertion below from "key = value" spacing in the file.
+  fed_enabled="$(sed -n '/^\[org\.gnome\.shell\]/,/^\[/p' "$fed_override" |
+    sed -n 's/^[[:blank:]]*enabled-extensions[[:blank:]]*=[[:blank:]]*//p' |
+    tail -n 1 | tr -d '[:blank:]')"
+fi
+
+if [ -z "$fed_enabled" ] || [ "$fed_enabled" = '[]' ]; then
+  enabled_list="['$ext_uuid']"
+else
+  # Cut off the GVariant array's closing bracket and insert our uuid.
+  enabled_list="${fed_enabled%]}, '${ext_uuid}']"
+fi
+printf 'enabled-extensions=%s\n' "$enabled_list" >> "$ours_override"
+# Assert placement, not just presence: glib-compile-schemas without --strict
+# silently IGNORES a key that lands in the wrong section, which would happen
+# if a future edit appends another [section] to this override before the
+# appended line. Fail the build instead of shipping a dead feature.
+if ! sed -n '/^\[org\.gnome\.shell\]/,/^\[/p' "$ours_override" | grep -Fq "$ext_uuid"; then
+  echo "error: enabled-extensions did not land under [org.gnome.shell]" >&2
+  exit 1
+fi
+
+glib-compile-schemas "$schema_dir"
 #### Enable user services
 systemctl --global enable wacom-stylus-keyfile.timer
 systemctl --global enable wacom-stylus-keyfile.service
