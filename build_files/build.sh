@@ -46,9 +46,10 @@ dnf5 install -y keyd
 # -y is load-bearing: without it the plugin's third-party-repo confirmation
 # reads empty stdin in the build container and silently exits 0 without
 # writing the repo file. Like the RPM Fusion/Terra repos above, the repo file
-# is baked into /etc and stays live on deployed hosts for runtime layering
-# (bootc upgrades pull OCI images, never packages, so the image's own content
-# is not updateable from Copr).
+# is baked into /etc. Hosts never consult it at runtime for layering though:
+# LockLayering=true rejects rpm-ostree install (see
+# system_files/etc/rpm-ostreed.conf), and bootc upgrades pull OCI images,
+# never packages, so the image's own content is not updateable from Copr.
 dnf5 install -y dnf5-plugins
 dnf5 copr enable -y zhchmmx/pixel-blue-logos
 # A plain install would fail on the package's Conflicts: fedora-logos (the
@@ -125,8 +126,9 @@ ln -s /dev/null /etc/systemd/system/flatpak-add-fedora-repos.service
 # Upstream ships Firefox as an RPM (firefox + firefox-langpacks) baked into
 # the base ostree commit and installed into read-only /usr, where it cannot
 # be removed at runtime. Drop both packages from the image. Firefox stays
-# available to users via Flathub (flatpak install flathub org.mozilla.firefox)
-# or rpm-ostree/bootc layering.
+# available to users via Flathub (flatpak install flathub org.mozilla.firefox);
+# runtime rpm-ostree layering is rejected on this image (LockLayering=true,
+# see the rpm-ostreed section below and system_files/etc/rpm-ostreed.conf).
 
 dnf5 remove -y firefox firefox-langpacks
 dnf5 remove -y gnome-shell-extension-background-logo
@@ -224,6 +226,41 @@ EOF
 #### Enable system services
 systemctl enable keyd
 systemctl enable podman.socket
+
+### System updates: rpm-ostree auto-staging for GNOME Software
+#
+# GNOME Software ships its own rpm-ostree plugin (it activates whenever
+# /run/ostree-booted exists, which it does on this Silverblue-based
+# image); no third-party PackageKit backend is involved, and the
+# PackageKit-bootc experiment from #73 is reverted — its upstream
+# self-describes as a deprecated temporary hack and it never activated
+# here anyway.
+#
+# The plugin reads the rpm-ostreed daemon over D-Bus: a check shows up as
+# listed updates (with per-package diffs and security urgency), and a
+# STAGED deployment shows up as the "restart to update" prompt (the shell
+# power menu picks the same staged deployment up as "Update and Restart").
+# Making that loop run by itself takes the two pieces rpm-ostreed.conf(5)
+# documents:
+#   1. /etc/rpm-ostreed.conf — shipped at system_files/etc/rpm-ostreed.conf
+#      and copied to /etc by the cp at the top of this script; the rechunk
+#      step's container commit moves it to /usr/etc, from where deployment
+#      seeds /etc. It sets AutomaticUpdatePolicy=stage (the automatic
+#      trigger downloads and stages the new image for next boot instead of
+#      merely checking) and LockLayering=true (runtime layering/overrides
+#      rejected, so staged image updates can never fail on layered-package
+#      depsolve).
+#   2. this timer — rpm-ostree ships rpm-ostreed-automatic.{service,timer}
+#      un-enabled; the timer runs
+#      `rpm-ostree upgrade --trigger-automatic-update-policy` one hour
+#      after boot and daily thereafter.
+#
+# The plugin is a separate Fedora package (subpackage of gnome-software,
+# pulled into the Silverblue image via Supplements). Assert it is present,
+# so a base that ever drops it fails the build loudly instead of shipping
+# a silently dead update UI:
+rpm -q gnome-software-rpm-ostree
+systemctl enable rpm-ostreed-automatic.timer
 
 ### GNOME Shell default dash favorites
 #
