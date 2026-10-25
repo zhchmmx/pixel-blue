@@ -15,10 +15,10 @@
 set -ouex pipefail
 
 # Point os-release's LOGO= at the Pixel Blue icon so GNOME surfaces that
-# render the distribution logo (Overview, GNOME Software) pick up Pixel Blue
-# artwork once the RPM is installed. Only the LOGO key is rewritten here:
-# NAME/PRETTY_NAME are rebranded by 90-os-name.sh, and ID=fedora and the
-# VARIANT* keys stay untouched (Flatpak / GNOME Software detection and the
+# render the distribution logo (Overview, GNOME Settings' About panel) pick
+# up Pixel Blue artwork once the RPM is installed. Only the LOGO key is
+# rewritten here: NAME/PRETTY_NAME are rebranded by 90-os-name.sh, and
+# ID=fedora and the VARIANT* keys stay untouched (Flatpak detection and the
 # Anaconda Silverblue ISO profile depend on them).
 
 if grep -q '^LOGO=' /usr/lib/os-release; then

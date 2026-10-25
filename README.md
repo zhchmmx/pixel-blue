@@ -43,11 +43,7 @@ Every build is also published with a version tag, so you can freeze to an exact 
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 ```
 
-The tag is `<UTC build date>.<GitHub Actions run number>` (for example `20261024.42`) and contains neither the branch name nor the commit hash. Take the number from the workflow run that built the image; the commit is recorded in the image's `org.opencontainers.image.revision` label.
-
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a version tag will not receive updates until they switch back to a channel.
-
-> For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
+After that, you may reboot your device to see the changes. Hosts tracking a moving channel (`latest` or `testing`) receive new builds automatically; users pinned to a version tag will not receive updates until they switch back to a channel.
 
 # Suspend and Sleep (S3 vs Modern Standby)
 
@@ -73,20 +69,7 @@ expect higher lid-close power draw.
 
 # Keyboard Layout (ChromeOS-style)
 
-The Pixelbook keyboard has no Home/End, Page Up/Down, forward Delete, Caps Lock
-or dedicated F1–F12 keys. The image uses [keyd](https://github.com/rvaiya/keyd)
-so these are reached with the **Search** and **Alt** keys, exactly the way
-ChromeOS does it — with one deliberate exception: the page keys (`Alt+↑/↓`)
-are left unmapped so apps keep them (see **Alt held**). The combos follow
-the official Google shortcut list, and the
-keys keyd *emits* are chosen so they do not collide with GNOME's own defaults
-(verified against upstream `gsettings-desktop-schemas`). The config lives in
-`system_files/etc/keyd/cros.conf` (plus `system_files/usr/lib/udev/hwdb.d/70-pixel-keyboard.hwdb`
-for the Three-lines and Assistant keys); this table is the human-readable reference.
-
-Sources: [ChromeOS keyboard shortcuts](https://support.google.com/chromebook/answer/183101) ·
-[Use your keyboard / remap keys](https://support.google.com/chromebook/answer/1047364) ·
-GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybindings`.
+The Pixelbook keyboard is remapped via [keyd](https://github.com/rvaiya/keyd). The mappings are:
 
 ## Top row (bare press)
 
@@ -102,9 +85,6 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
 
 ## Search (Meta) held
-
-`Search` is natively `Meta`, so its own combos (`Search` alone, `Search+L` lock,
-`Search+A`, `Search+V` …) are GNOME-native and left untouched.
 
 | Combo | Emits | Function |
 | --- | --- | --- |
@@ -125,91 +105,15 @@ GNOME defaults in `org.gnome.desktop.wm.keybindings` and `org.gnome.shell.keybin
 | `Alt` + `Search` | `Caps Lock` | Caps Lock |
 | `Alt` + `Brightness −` / `+` | keyboard backlight | native pass-through |
 
-`Ctrl+Alt+↑/↓` and `Ctrl+Alt+←/→` are **not** remapped — GNOME binds them to workspace
-switching, and the owner chose to keep that. Bare `Alt+←/→` is likewise left untouched
-(apps use it for back/forward), since ChromeOS does not use it for text navigation.
-The official ChromeOS page keys, `Alt+↑/↓`, are deliberately **not** mapped either:
-keyd sits below the app layer, so binding them globally would cost GNOME Files its
-parent-folder shortcut (`Alt+↑`) and editors their move-line bindings (`Alt+↑/↓`) —
-the owner chose to keep those app shortcuts instead.
-
-## Function keys & the Assistant key
-
-- `F1`–`F10`: `Search` + top row. `F11`: `Fullscreen`. `F12`: `Search` + `Three-lines`.
-- **Assistant** key (AT scancode `0xd8`, confirmed via `evtest`): mapped by the udev
-  hwdb to `F23`. `F13` was abandoned because on some distros GNOME's
-  `control-center-static` binds `F13` to launch Settings — pressing the key opened
-  Settings. `F23` has no GNOME default; bind it to a custom shortcut in
-  Settings → Keyboard → Custom Shortcuts if desired.
-- **Three-lines** key (AT scancode `0x5d`, right of volume-up): ChromeOS names it
-  `KEY_CONTROLPANEL` (and atkbd's *default* keycode for this scancode is `F13` —
-  which is why older images "recognized" the key as F13/Settings, never as sleep).
-  keyd only knows key codes 0–255 and silently discards anything larger while it
-  holds the device (`KEY_CONTROLPANEL` is `0x243`), so the key presses produced
-  nothing and did not even show up in `keyd monitor`. The hwdb therefore maps the
-  scancode to `KEY_DASHBOARD` (keyd name `dashboard`) and keyd assigns the actions
-  (`Super+S` bare, `F12` with `Search`).
-- `Ctrl+Alt+Backspace` → `Ctrl+Alt+Delete` (kept as-is).
-
-## Caveats & not-mapped items
-
-- **Overview = screenshot**: a deliberate divergence from ChromeOS (where bare Overview
-  opens the Desks picker and `Ctrl+Overview` screenshots). Per owner decision it maps
-  straight to the screenshot UI and does not keep the original key.
-- **Right Alt**: kept as keyd's default (`rightalt = layer(altgr)`), so it emits
-  `RIGHTALT` (not `LEFTALT`). An `[altgr]` layer mirrors the `[alt]` layer so
-  right-Alt combos (`Alt+Backspace`, `Alt+brightness`, `Alt+Search`) behave
-  identically to left-Alt ones, matching ChromeOS.
-- **Not mapped** (out of scope for a keyboard layer): right-click (`Search`/`Alt` + tap —
-  touchpad/Wayland), clipboard history (`Search+V`), emoji panel, and the accessibility
-  combos (`Search+Ctrl+h`, magnifier). Use two-finger tap and the OS UI instead.
-- **Device-verify before trusting**: run `sudo keyd check` after editing. The raw
-  arrive-as codes (Assistant scancode `0xd8` → `f23`, Three-lines scancode `0x5d`
-  → `dashboard`) are confirmed with `sudo evtest` or
-  `sudo systemd-hwdb query "evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGoogle:pnEve:pvr*"`;
-  `keyd monitor` shows keyd's *output* after mapping, not scancodes. Also confirm
-  the top row arrives as media codes (`back`, `zoom`, `scale`, …) as this
-  config assumes. Some firmware/distro states report the top row as `f1`–`f10`
-  instead; if `keyd monitor` shows that, the left-hand key names above (`zoom`,
-  `scale`, and the `back`…`volumeup` list under Search) must be rewritten to the
-  `f1`–`f10` codes. The Three-lines key is *not* a sleep key — earlier revisions
-  wrongly assumed it arrived as `sleep`; it is scancode `0x5d` (atkbd default
-  keycode `F13`; ChromeOS calls it `KEY_CONTROLPANEL`), remapped to `dashboard`
-  by the hwdb because keyd cannot see `KEY_CONTROLPANEL` at all (code > 255).
-- **Updated hosts keep `/etc`**: the image build compiles the hwdb with
-  `systemd-hwdb update --usr` (only the compiled `hwdb.bin` is read at runtime).
-  bootc updates preserve `/etc`, so devices from earlier images may still carry
-  the old `/etc/udev/hwdb.d/61-pixel-keyboard.hwdb`. The new `70-` filename
-  deliberately sorts after the legacy `61-` record (all hwdb files merge in
-  lexicographic order and later files win per property), but if a key stops
-  behaving after an update, clean up once:
-  `sudo rm -f /etc/udev/hwdb.d/61-pixel-keyboard.hwdb /etc/udev/hwdb.bin && sudo systemd-hwdb update && sudo udevadm trigger --subsystem-match=input && sudo systemctl restart keyd`.
-
 # Modifications to the Upstream
 
 - Add audio support from [WeirdTreeThing](https://github.com/WeirdTreeThing).
 - Add keymap via [keyd](https://github.com/rvaiya/keyd).
-- Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
+- Add RPM Fusion and full multimedia codecs with VA-API hardware decoding.
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
-- Tablet-mode keyboard backlight (issue #72): folding the Pixelbook into tablet mode turns the keyboard backlight off and hides the quick-settings "Keyboard" item; unfolding restores the previous level (ChromeOS powerd semantics). Implemented by the vendored GNOME Shell extension in `system_files/usr/share/gnome-shell/extensions/tablet-kbd-backlight@zhchmmx.github.io/`, enabled through `enabled-extensions` in `system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override`.
+- Add tablet-mode keyboard backlight (issue #72).
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
-
-# Waydroid First-Time Setup
-
-The Waydroid packages are baked into the image, but the Android system image is not pre-downloaded. On first use, run:
-
-``` bash
-sudo waydroid init
-```
-
-This downloads the LineageOS-based Android system image (choose the variant you want when prompted). Afterwards start the container and launch it:
-
-``` bash
-sudo systemctl start waydroid-container
-waydroid session start
-waydroid show-full-ui
-```
 
 # Learn More
 
