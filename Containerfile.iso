@@ -23,6 +23,7 @@ ARG BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest
 FROM scratch AS ctx
 COPY build_files/iso /iso
 COPY flatpak_refs /flatpak_refs
+COPY system_files/etc/containers /containers
 
 FROM ${BASE_IMAGE}
 
@@ -30,6 +31,7 @@ ARG BASE_IMAGE
 ARG PAYLOAD_IMAGE
 RUN --mount=type=bind,from=ctx,source=/iso,target=/ctx/iso \
     --mount=type=bind,from=ctx,source=/flatpak_refs,target=/ctx/flatpak_refs \
+    --mount=type=bind,from=ctx,source=/containers,target=/ctx/containers \
     --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/log \
     --mount=type=tmpfs,dst=/tmp \

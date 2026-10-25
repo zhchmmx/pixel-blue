@@ -42,6 +42,15 @@ fi
 # Anaconda installs from containers-storage, so the image the ISO installs
 # must be present inside the live rootfs. Pull the same published image the
 # ISO layer is built from; it is never the ISO layer itself.
+#
+# The pull must verify the payload's cosign signature. The published base
+# image may still carry an older (or no) containers configuration, so install
+# the repo's current one first: registries.d enables reading the cosign .sig
+# tags and the policy accepts cosign's repo-level signature identity for a
+# tagged pull.
+install -Dm644 /ctx/containers/policy.json /etc/containers/policy.json
+install -Dm644 /ctx/containers/registries.d/pixel-blue.yaml \
+  /etc/containers/registries.d/pixel-blue.yaml
 podman pull "$PAYLOAD_IMAGE"
 podman image exists "$PAYLOAD_IMAGE" || {
   echo "error: payload image $PAYLOAD_IMAGE is missing from container storage" >&2
