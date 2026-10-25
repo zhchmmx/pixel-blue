@@ -204,6 +204,7 @@ the owner chose to keep those app shortcuts instead.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Tablet-mode keyboard backlight (issue #72): folding the Pixelbook into tablet mode turns the keyboard backlight off and hides the quick-settings "Keyboard" item; unfolding restores the previous level (ChromeOS powerd semantics). Implemented by the vendored GNOME Shell extension in `system_files/usr/share/gnome-shell/extensions/tablet-kbd-backlight@zhchmmx.github.io/`, enabled through `enabled-extensions` in `system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override`.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
+- Replace GNOME Software with Flatpaks (issue #87): the `gnome-software` and `gnome-software-rpm-ostree` RPMs are dropped from the image, and [Bazaar](https://flathub.org/apps/io.github.kolunmi.Bazaar) (the store, pinned in the dash where GNOME Software used to be) plus [Firmware](https://flathub.org/apps/org.gnome.Firmware) (firmware updates) are preinstalled from Flathub via `flatpak_refs/`. The `fwupd` RPM stays in the image: the Firmware app talks to the host daemon over D-Bus. OS updates: with GNOME Software gone there is no store-provided update UI (including the power-menu "Update and Restart"); `bootc upgrade` / `rpm-ostree upgrade` remain the path until upstream settings integration lands.
 
 # Waydroid First-Time Setup
 

@@ -8,9 +8,8 @@
 # all of them say "Pixel Blue".
 #
 # Only NAME and PRETTY_NAME are touched: ID, VERSION*, VARIANT*,
-# PLATFORM_ID and the URL keys must stay intact, because Flatpak,
-# GNOME Software and the Anaconda Silverblue profile detection depend
-# on them.
+# PLATFORM_ID and the URL keys must stay intact, because Flatpak and
+# the Anaconda Silverblue profile detection depend on them.
 #
 # PRETTY_NAME is rewritten wholesale (not by prefix sed, because the
 # upstream value is "Fedora Linux <version> (Silverblue)" and a prefix
