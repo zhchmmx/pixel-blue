@@ -14,7 +14,7 @@
 # replace whole keys and the zz0-* file sorts last, so it wins over Fedora's
 # org.gnome.shell.gschema.override (fedora-release-identity-silverblue) instead
 # of merging with it. Fedora's F44 value only lists
-# background-logo@fedorahosted.org, the extension removed in 30-drop-firefox.sh,
+# background-logo@fedorahosted.org, the extension removed in 30-drop-rpms.sh,
 # so there is nothing to inherit; following a future Fedora addition is a
 # deliberate edit in that file, not build-time detection.
 #
