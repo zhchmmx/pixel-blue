@@ -85,10 +85,11 @@ systemctl enable livesys.service livesys-late.service
 
 # Brand the live installer entry point and make its icon resolvable. The
 # pixel-blue-logos RPM provides pixel-blue-logo-icon; Anaconda and the
-# welcome screen still look up the Fedora names. liveinst.desktop ships only
-# localized Name[...] keys, so add the unlocalized Name (the fallback shown
-# when no locale matches) instead of editing one.
-sed -i -e '/^Name=/d' \
+# welcome screen still look up the Fedora names. liveinst.desktop ships an
+# unlocalized Name plus localized Name[...] entries, so delete both and add
+# the branded Name; the translations would otherwise keep winning over it
+# in non-English locales.
+sed -i -e '/^Name=/d' -e '/^Name\[/d' \
   -e 's/^NoDisplay=true/NoDisplay=false/' \
   /usr/share/applications/liveinst.desktop
 sed -i '/^\[Desktop Entry\]/a Name=Install Pixel Blue' \
@@ -215,6 +216,20 @@ for origin in "${origins[@]}"; do
     's|^container-image-reference=.*|container-image-reference=ostree-image-signed:docker://@PAYLOAD_IMAGE@|' \
     "$origin"
   grep -q '^container-image-reference=ostree-image-signed:docker://@PAYLOAD_IMAGE@$' "$origin"
+
+  # The signed origin forces every bootc upgrade to verify the payload
+  # against the host's /etc/containers config. A payload image published
+  # before the matchRepository/registries.d change still carries the old
+  # config, which would fail that check forever. Seed the live layer's
+  # current files into the deployment: libostree initializes a deployment's
+  # /etc (the origin file's <rev>.<serial> directory) at deploy time, and
+  # keeps these local edits across upgrades until the image ships matching
+  # files itself.
+  deploy_dir="$(dirname "$origin")/$(basename "$origin" .origin)"
+  install -Dm644 /etc/containers/policy.json \
+    "${deploy_dir}/etc/containers/policy.json"
+  install -Dm644 /etc/containers/registries.d/pixel-blue.yaml \
+    "${deploy_dir}/etc/containers/registries.d/pixel-blue.yaml"
 done
 %end
 EOF
@@ -224,10 +239,10 @@ sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
 cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
 # Pixel Blue live install (titanoboa, issue #77).
+# The post-scripts in /usr/share/anaconda/post-scripts are auto-merged into
+# the kickstart by Anaconda (in name order, so restore-selinux-labels runs
+# last); %include-ing them here as well would execute every %post twice.
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
-%include /usr/share/anaconda/post-scripts/install-flatpaks.ks
-%include /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
-%include /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 EOF
 
 # --- Size ------------------------------------------------------------------

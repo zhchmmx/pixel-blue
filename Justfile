@@ -478,7 +478,8 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     # titanoboa has no releases/tags; run main.sh from the pinned commit. It
     # calls rootful podman itself (with build_iso.sh next to it), writes
-    # <iso-label>.iso into build/ and prints that path on stdout.
+    # <iso-label>.iso into TITANOBOA_OUTPUT_DIR and prints that path on
+    # stdout.
     titanoboa_dir="$(mktemp -d)"
     trap 'rm -rf "${titanoboa_dir}"' EXIT
     for file in main.sh build_iso.sh; do
@@ -489,8 +490,15 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
     chmod +x "${titanoboa_dir}/main.sh" "${titanoboa_dir}/build_iso.sh"
 
     mkdir -p build
+    # main.sh selects its result with a *.iso glob, so TITANOBOA_OUTPUT_DIR
+    # must hold exactly one ISO: use a fresh dir under build/ (same
+    # filesystem, so the rename below never copies) and move the output to
+    # its final name afterwards. Pointing it straight at build/ would make
+    # reruns pick up the stale pixel-blue.iso and abort on an mv onto itself.
+    iso_out="$(mktemp -d -p build)"
+    trap 'rm -rf "${titanoboa_dir}" "${iso_out}"' EXIT
     iso_path="$(TITANOBOA_CTR_IMAGE="localhost/{{ image_name }}-iso:{{ tag }}" \
-      TITANOBOA_OUTPUT_DIR="${PWD}/build" \
+      TITANOBOA_OUTPUT_DIR="${iso_out}" \
       "${titanoboa_dir}/main.sh")"
     sudo chown "$(id -u):$(id -g)" "${iso_path}"
     mv -f "${iso_path}" build/pixel-blue.iso
