@@ -16,10 +16,8 @@ set -ouex pipefail
 # -y is load-bearing: without it the plugin's third-party-repo confirmation
 # reads empty stdin in the build container and silently exits 0 without
 # writing the repo file. Like the RPM Fusion/Terra repos in 05-repos.sh, the
-# repo file is baked into /etc. Hosts never consult it at runtime for
-# layering though:
-# LockLayering=true rejects rpm-ostree install (see
-# system_files/etc/rpm-ostreed.conf), and bootc upgrades pull OCI images,
+# repo file is baked into /etc. Hosts never consult it at runtime though:
+# bootc upgrades (staged daily by uupd, see 12-uupd.sh) pull OCI images,
 # never packages, so the image's own content is not updateable from Copr.
 dnf5 install -y dnf5-plugins
 dnf5 copr enable -y zhchmmx/pixel-blue-logos

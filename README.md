@@ -45,9 +45,19 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 
 The tag is `<UTC build date>.<GitHub Actions run number>` (for example `20261024.42`) and contains neither the branch name nor the commit hash. Take the number from the workflow run that built the image; the commit is recorded in the image's `org.opencontainers.image.revision` label.
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a version tag will not receive updates until they switch back to a channel.
+After that, you may reboot your device to see the changes. Hosts tracking a moving channel (`latest` or `testing`) receive new builds automatically; users pinned to a version tag will not receive updates until they switch back to a channel. See System Updates below for how that works.
 
 > For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
+
+# System Updates
+
+Pixel Blue is a bootc image, so the OS updates atomically as a whole OCI image, never package-by-package. The image ships [uupd](https://github.com/ublue-os/uupd) as the update manager (the replacement for the earlier, reverted rpm-ostree auto-staging and PackageKit experiments):
+
+- A systemd timer (`uupd.timer`) runs once a day at 04:00 plus a random delay of up to 15 minutes. `Persistent=true` means a machine that was off or suspended at that time catches up on the next boot. Each run executes `bootc upgrade --check` and, when a newer build of the tracked channel exists, stages the new deployment.
+- Nothing ever reboots on its own. The staged deployment applies on the next reboot of your choice. While the image ships GNOME Software, its rpm-ostree plugin also surfaces a staged update as the power menu's "Update and Restart" item.
+- Gates keep the daily check honest on a laptop: it defers when running on battery below 20%, when power-saver mode is on, when the CPU 5-minute load average exceeds 50 or memory use exceeds 90%, and on metered or busy networks (a docked, charging device passes the battery gate at any level). All thresholds are tunable in `/etc/uupd/config.json`, repo copy in `system_files/etc/uupd/config.json`.
+- Only uupd's `system` module is enabled; its `flatpak`, `distrobox` and `brew` modules are disabled because applications are updated through the software store, not the OS timer.
+- To check on demand instead of waiting for the timer: `sudo systemctl start uupd-manual.service` (the same run with the hardware gates skipped; `uupd.service` keeps them). To update fully by hand instead: `sudo bootc upgrade` and reboot. Rollback stays available with `sudo bootc rollback`.
 
 # Suspend and Sleep (S3 vs Modern Standby)
 

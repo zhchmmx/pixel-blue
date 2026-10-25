@@ -7,8 +7,8 @@ set -ouex pipefail
 # the base ostree commit and installed into read-only /usr, where it cannot
 # be removed at runtime. Drop both packages from the image. Firefox stays
 # available to users via Flathub (flatpak install flathub org.mozilla.firefox);
-# runtime rpm-ostree layering is rejected on this image (LockLayering=true,
-# see system_files/etc/rpm-ostreed.conf).
+# the OS itself moves as whole bootc images (staged by uupd, see 12-uupd.sh),
+# not per-package layering.
 
 dnf5 remove -y firefox firefox-langpacks
 dnf5 remove -y gnome-shell-extension-background-logo
