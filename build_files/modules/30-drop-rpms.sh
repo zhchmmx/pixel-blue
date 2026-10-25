@@ -1,5 +1,4 @@
 #!/bin/bash
-# Unwanted base RPMs: Firefox, GNOME System Monitor, GNOME Software
 
 set -ouex pipefail
 
