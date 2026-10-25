@@ -141,7 +141,10 @@ for kdir in /usr/lib/modules/*; do
     "$kdir/initramfs.img" "$kver"
   chmod 0600 "$kdir/initramfs.img"
   lsinitrd "$kdir/initramfs.img" >/tmp/lsinitrd.list
-  if ! grep -q 'sbin/dmsquash-live-root' /tmp/lsinitrd.list; then
+  # Match the basename only: dracut-install stores the script under usr/bin
+  # because the initramfs ships sbin -> usr/sbin -> bin, even though the
+  # module installs it as /sbin/dmsquash-live-root (which still resolves).
+  if ! grep -q 'dmsquash-live-root' /tmp/lsinitrd.list; then
     echo "error: dmsquash-live missing from $kdir/initramfs.img" >&2
     exit 1
   fi
