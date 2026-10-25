@@ -37,15 +37,27 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing
 
 ### Pinning to a specific build
 
-Every build is also published with a commit-based tag, so you can freeze to an exact build:
+Every build is also published with a version tag, so you can freeze to an exact build:
 
 ``` bash
-sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest-<commit>
+sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 ```
 
-After that, you may reboot your device to see the changes. Users on a moving channel (`latest` or `testing`) are updated automatically; users pinned to a commit tag will not receive updates until they switch back to a channel.
+The tag is `<UTC build date>.<GitHub Actions run number>` (for example `20261024.42`) and contains neither the branch name nor the commit hash. Take the number from the workflow run that built the image; the commit is recorded in the image's `org.opencontainers.image.revision` label.
+
+After that, you may reboot your device to see the changes. Hosts tracking a moving channel (`latest` or `testing`) receive new builds automatically; users pinned to a version tag will not receive updates until they switch back to a channel. See System Updates below for how that works.
 
 > For maintainers: `latest` is built from the `main` branch and `testing` from the `testing` branch. To roll a change out, commit it on `testing`, verify the published `testing` image, then merge `testing` into `main` to promote it to `latest`.
+
+# System Updates
+
+Pixel Blue is a bootc image, so the OS updates atomically as a whole OCI image, never package-by-package. The image ships [uupd](https://github.com/ublue-os/uupd) as the update manager (the replacement for the earlier, reverted rpm-ostree auto-staging and PackageKit experiments):
+
+- A systemd timer (`uupd.timer`) runs once a day at 04:00 plus a random delay of up to 15 minutes. `Persistent=true` means a machine that was off or suspended at that time catches up on the next boot. Each run executes `bootc upgrade --check` and, when a newer build of the tracked channel exists, stages the new deployment.
+- Nothing ever reboots on its own. The staged deployment applies on the next reboot of your choice. With GNOME Software replaced by Bazaar (issue #87), there is no store-provided "Update and Restart" power-menu prompt for staged OS updates.
+- Gates keep the daily check honest on a laptop: it defers when running on battery below 20%, when power-saver mode is on, when the CPU 5-minute load average exceeds 50 or memory use exceeds 90%, and on metered or busy networks (a docked, charging device passes the battery gate at any level). All thresholds are tunable in `/etc/uupd/config.json`, repo copy in `system_files/etc/uupd/config.json`.
+- Only uupd's `system` module is enabled; its `flatpak`, `distrobox` and `brew` modules are disabled because applications are updated through the software store, not the OS timer.
+- To check on demand instead of waiting for the timer: `sudo systemctl start uupd-manual.service` (the same run with the hardware gates skipped; `uupd.service` keeps them). To update fully by hand instead: `sudo bootc upgrade` and reboot. Rollback stays available with `sudo bootc rollback`.
 
 # Suspend and Sleep (S3 vs Modern Standby)
 
@@ -190,6 +202,7 @@ the owner chose to keep those app shortcuts instead.
 - Add RPM Fusion (free + nonfree) plus full multimedia codecs: complete `ffmpeg`, the GStreamer plugin set (including `bad-freeworld` and `ugly` from RPM Fusion), and full VA-API hardware video decoding. AAC decode is software (via `ffmpeg`/`gstreamer1-plugin-libav`); HEVC (8/10-bit) video decode is accelerated on the Pixelbook's Kaby Lake iGPU, with `vainfo` listing the video profiles (HEVC, VP9).
 - Improve Pixelbook Pen support.
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
+- Tablet-mode keyboard backlight (issue #72): folding the Pixelbook into tablet mode turns the keyboard backlight off and hides the quick-settings "Keyboard" item; unfolding restores the previous level (ChromeOS powerd semantics). Implemented by the vendored GNOME Shell extension in `system_files/usr/share/gnome-shell/extensions/tablet-kbd-backlight@zhchmmx.github.io/`, enabled through `enabled-extensions` in `system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override`.
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
 - Add MrChromebox UEFI firmware update checking and flashing through GNOME Software (see below).
 
@@ -244,6 +257,7 @@ curl -LO https://mrchromebox.tech/firmware-util.sh && sudo bash firmware-util.sh
 ```
 
 This feature only checks and flashes; it never touches the firmware automatically — updates are user-initiated only.
+- Replace GNOME Software with Flatpaks (issue #87): the `gnome-software` and `gnome-software-rpm-ostree` RPMs are dropped from the image, and [Bazaar](https://flathub.org/apps/io.github.kolunmi.Bazaar) (the store, pinned in the dash where GNOME Software used to be) plus [Firmware](https://flathub.org/apps/org.gnome.Firmware) (firmware updates) are preinstalled from Flathub via `flatpak_refs/`. The `fwupd` RPM stays in the image: the Firmware app talks to the host daemon over D-Bus. OS updates: with GNOME Software gone there is no store-provided update UI (including the power-menu "Update and Restart"); `bootc upgrade` / `rpm-ostree upgrade` remain the path until upstream settings integration lands.
 
 # Waydroid First-Time Setup
 

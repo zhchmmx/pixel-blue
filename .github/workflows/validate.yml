@@ -18,7 +18,7 @@ defaults:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Shell: 3 scripts, discovered by shebang (no .sh extension requirement)
+  # Shell: scripts, discovered by shebang (no .sh extension requirement)
   # ---------------------------------------------------------------------------
   shell:
     name: Shell

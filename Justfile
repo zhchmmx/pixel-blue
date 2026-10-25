@@ -83,8 +83,11 @@ sudoif command *args:
 #   $target_image - The tag you want to apply to the image (default: $image_name).
 #   $tag - The tag for the image (default: $default_tag).
 #
-# The script constructs the version string using the tag and the current date.
-# If the git working directory is clean, it also includes the short SHA of the current HEAD.
+# The script sets the version label to <UTC date>.<build number> (for example
+# 20261024.42). In CI that build number is the GitHub Actions run number; local
+# builds fall back to BUILD_NUMBER or the commit count. The version carries no
+# branch name or commit hash; the commit is recorded separately in
+# org.opencontainers.image.revision.
 #
 # just build $target_image $tag
 #
@@ -100,6 +103,8 @@ build $target_image=image_name $tag=default_tag:
 
     set -euox pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -107,7 +112,8 @@ build $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
         LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
         LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
-        LABELS+=("--label" "org.opencontainers.image.version={{ tag }}.$(date +%Y%m%d)-${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
     fi
 
     # Image metadata for https://artifacthub.io/ - This is optional but is highly recommended so we all can get a index of all the custom images
@@ -164,10 +170,21 @@ rechunk $target_image=image_name $tag=default_tag:
     podman tag "${CHUNKED_IMAGE}" "${target_image}:${tag}"
 
 # Split the image for smaller updates (Classical)!
+#
+# The chunker re-exports the whole tree through an ostree commit, and the
+# initramfs that ships in the chunked image is the base kernel-layer one
+# again even though 60-branding-dracut.sh regenerated it (issue #75: the boot/GDM-login
+# splash read the stale initrd copy, regardless of the final /usr artwork).
+# So after rechunking, regenerate the initramfs once more on the finished
+# image as one derived layer, asserting the baked watermark byte-matches the
+# live /usr copy (the pixel-blue-logos RPM installed in 10-logos.sh owns that
+# path after the swap; the check itself is payload-agnostic).
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
     set -xeuo pipefail
+
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
 
     # Use the already-built local image to avoid pulling from a remote registry
     RPM_OSTREE_CHUNKER_IMAGE="localhost/${target_image}:${tag}"
@@ -187,6 +204,82 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
 
+    # Regenerate the initramfs on the rechunked image so the boot splash
+    # matches the final /usr artwork: the chunker re-export puts the base
+    # kernel-layer initrd back into /usr/lib/modules/<kver>/initramfs.img,
+    # which the boot/GDM-login splash reads. The RUN also asserts that the
+    # watermark.png baked in the initrd byte-matches the live /usr copy, so a
+    # stale splash fails the build loudly. Appending a derived layer keeps the
+    # chunked layering (and thus delta updates) intact. dracut is called with
+    # the kernel version and the output path spelled out, because in a
+    # container it would otherwise default to /boot/initramfs-$kver.img and
+    # leave the image's /usr/lib/modules/<kver>/initramfs.img untouched.
+    # --add ostree is required for a bootable bootc initrd (it provides
+    # ostree-prepare-root, which prepares /sysroot before switch-root); the
+    # RUN asserts it landed so a bad initrd fails here, not at boot.
+    # Re-apply build metadata labels on the FINAL image. The chunker
+    # (rpm-ostree compose build-chunked-oci) re-exports the image from the
+    # ostree commit and does NOT carry over the config labels set by
+    # `just build` (org.opencontainers.image.*, io.artifacthub.package.*),
+    # so they must be re-stamped here or the pushed image loses them all
+    # (observed on GHCR: version label was null). Mirrors the logic in the
+    # build recipe verbatim, including the clean-working-tree condition.
+    LABELS=()
+    if [[ -z "$(git status -s)" ]]; then
+        GIT_SHA=$(git rev-parse --short HEAD)
+        LABELS+=("--label" "io.artifacthub.package.readme-url=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.documentation=https://raw.githubusercontent.com/{{ repo_organization }}/{{ image_name }}/${GIT_SHA}/README.md")
+        LABELS+=("--label" "org.opencontainers.image.source=https://github.com/{{ repo_organization }}/{{ image_name }}/blob/${GIT_SHA}/Containerfile")
+        LABELS+=("--label" "org.opencontainers.image.url=https://github.com/{{ repo_organization }}/{{ image_name }}/tree/${GIT_SHA}")
+        LABELS+=("--label" "org.opencontainers.image.version=${IMAGE_VERSION}")
+        LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
+    fi
+    LABELS+=("--label" "io.artifacthub.package.deprecated=false")
+    LABELS+=("--label" "io.artifacthub.package.keywords={{ image_keywords }}")
+    LABELS+=("--label" "io.artifacthub.package.license=Apache-2.0")
+    LABELS+=("--label" "io.artifacthub.package.logo-url={{ image_logo_url }}")
+    LABELS+=("--label" "io.artifacthub.package.prerelease=false")
+    LABELS+=("--label" "org.opencontainers.image.created=$(date -u +%Y\-%m\-%d\T%H\:%M\:%S\Z)")
+    LABELS+=("--label" "org.opencontainers.image.description={{ image_desc }}")
+    LABELS+=("--label" "org.opencontainers.image.title={{ image_name }}")
+    LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
+
+    SPLASH_CONTAINERFILE="$(mktemp)"
+    # (written with printf, not a heredoc: `just --fmt` requires every recipe
+    # line to be indented, which a terminating heredoc marker cannot be)
+    printf '%s\n' \
+      'ARG BASE' \
+      'FROM ${BASE}' \
+      'RUN --mount=type=tmpfs,dst=/tmp mkdir -p /var/roothome && chmod 700 /var/roothome && \' \
+      '    for kdir in /usr/lib/modules/*; do \' \
+      '        [ -f "$kdir/modules.dep" ] || continue; \' \
+      '        dracut --no-hostonly --add ostree --force "$kdir/initramfs.img" "$(basename "$kdir")" || exit 1; \' \
+      '        chmod 0600 "$kdir/initramfs.img"; \' \
+      '        lsinitrd "$kdir/initramfs.img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "usr/lib/ostree/ostree-prepare-root" /tmp/lsinitrd.list || exit 1; \' \
+      '    done && \' \
+      '    wm=/usr/share/plymouth/themes/spinner/watermark.png && \' \
+      '    want=$(sha256sum "$wm" | cut -d" " -f1) && \' \
+      '    ok=0 && \' \
+      '    for img in /usr/lib/modules/*/initramfs.img; do \' \
+      '        lsinitrd "$img" > /tmp/lsinitrd.list; \' \
+      '        grep -q "themes/spinner/watermark.png" /tmp/lsinitrd.list || continue; \' \
+      '        lsinitrd -f "$wm" "$img" > /tmp/wm_baked.png; \' \
+      '        got=$(sha256sum /tmp/wm_baked.png | cut -d" " -f1); \' \
+      '        [ "$got" = "$want" ] && ok=1; \' \
+      '    done; \' \
+      '    if [ "$ok" != 1 ]; then echo "plymouth theme files in initrd:"; \' \
+      '        for img in /usr/lib/modules/*/initramfs.img; do lsinitrd "$img" | grep "themes/"; done; \' \
+      '        exit 1; fi; \' \
+      '    [ "$ok" = 1 ]' \
+      > "${SPLASH_CONTAINERFILE}"
+    podman build --pull=never --layers \
+      "${LABELS[@]}" \
+      --build-arg BASE="localhost/${target_image}:${tag}" \
+      --tag "${target_image}:${tag}" \
+      --file "${SPLASH_CONTAINERFILE}" .
+    rm -f "${SPLASH_CONTAINERFILE}"
+
 # Generate Default Tag
 [group('Utility')]
 generate-default-tag $tag=default_tag:
@@ -201,12 +294,13 @@ generate-build-tags $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
     set -eoux pipefail
 
+    IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
+
     BUILD_TAGS=()
 
-    # Commit-based pin tag, used to freeze a specific build
+    # Version-based pin tag, used to freeze a specific build
     if [[ -z "$(git status -s)" ]]; then
-        GIT_SHA=$(git rev-parse --short HEAD)
-        BUILD_TAGS+=("${tag}-${GIT_SHA}")
+        BUILD_TAGS+=("${IMAGE_VERSION}")
     fi
 
     # Moving channel tag (latest or testing)
@@ -356,6 +450,12 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 #   - uses Anaconda's fedora-silverblue profile (VARIANT=Silverblue): the
 #     installer only asks for the destination, and account/timezone setup
 #     happens in gnome-initial-setup on first boot, like the official Fedora ISO
+#   - brands the installer environment itself via two lorax templates passed
+#     to ADDITIONAL_TEMPLATES space-delimited:
+#     disk_config/install_branding.tmpl (os-release + .buildstamp) and
+#     build_files/installer-branding.tmpl (the sidebar logo). The repo is
+#     mounted at /github/workspace, so the templates and their source PNG
+#     are addressed by their in-container paths
 #
 # Keep the jasonn3 image tag in sync with the SHA pinned for
 # jasonn3/build-container-installer in .github/workflows/build-disk.yml.
@@ -383,7 +483,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="4
       IMAGE_TAG="{{ tag }}" \
       VERSION="{{ version }}" \
       VARIANT="Silverblue" \
-      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl" \
+      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl /github/workspace/build_files/installer-branding.tmpl" \
       FLATPAK_REMOTE_NAME="flathub" \
       FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
       FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \

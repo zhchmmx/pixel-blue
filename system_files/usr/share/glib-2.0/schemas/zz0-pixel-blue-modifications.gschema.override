@@ -1,2 +1,10 @@
+# Pixel Blue gsettings defaults. glib-compile-schemas applies *.gschema.override
+# files in sorted-filename order and an override replaces a whole key, so this
+# file (zz0-, last) is the complete value for every key below: it replaces
+# Fedora's org.gnome.shell.gschema.override (fedora-release-identity-silverblue),
+# whose enabled-extensions only lists background-logo@fedorahosted.org, the
+# extension build.sh removes. To follow a Fedora addition, edit it here
+# explicitly instead of inheriting it at build time.
 [org.gnome.shell]
-favorite-apps=['org.gnome.Epiphany.desktop', 'org.gnome.Calendar.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Software.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.Calculator.desktop']
+favorite-apps=['org.gnome.Epiphany.desktop', 'org.gnome.Calendar.desktop', 'org.gnome.Nautilus.desktop', 'io.github.kolunmi.Bazaar.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.Calculator.desktop']
+enabled-extensions=['tablet-kbd-backlight@zhchmmx.github.io']

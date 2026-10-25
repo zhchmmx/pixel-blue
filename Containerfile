@@ -28,7 +28,8 @@ FROM quay.io/fedora/fedora-silverblue:latest
 # RUN rm /opt && mkdir /opt
 
 ### MODIFICATIONS
-## make modifications desired in your image and install packages by modifying the build.sh script
+## make modifications desired in your image and install packages by editing the
+## numbered modules in build_files/modules/ (run in order by build_files/build.sh)
 ## the following RUN directive does all the things required to run "build.sh" as recommended.
 
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \

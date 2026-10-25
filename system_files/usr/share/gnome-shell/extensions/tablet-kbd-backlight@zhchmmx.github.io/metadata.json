@@ -1,0 +1,10 @@
+{
+  "uuid": "tablet-kbd-backlight@zhchmmx.github.io",
+  "name": "Tablet Keyboard Backlight",
+  "description": "Turns the keyboard backlight off and hides its quick-settings item while the Pixelbook is folded into tablet mode; restores the previous level on unfold (ChromeOS powerd semantics).",
+  "shell-version": [
+    "50",
+    "51"
+  ],
+  "url": "https://github.com/zhchmmx/pixel-blue"
+}
