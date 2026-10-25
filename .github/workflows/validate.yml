@@ -62,6 +62,8 @@ jobs:
           sh_files=()
           while IFS= read -r f; do
             [ -f "$f" ] || continue
+            # vendor/ is verbatim upstream code, checked by the vendor job.
+            case "$f" in vendor/*) continue ;; esac
             [ "$(head -c 2 "$f" 2>/dev/null)" = '#!' ] || continue
             first=$(head -n 1 "$f" | tr -d '\r')
             case "$first" in
@@ -196,6 +198,71 @@ jobs:
             echo "::warning::ruff format reports formatting differences (advisory, run 'ruff format --line-length 120 <file>' locally)"
             exit 1
           }
+
+  # ---------------------------------------------------------------------------
+  # Vendored MrChromebox scripts: pinned commit, integrity, interface drift
+  # ---------------------------------------------------------------------------
+  vendor:
+    name: Vendor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Pinned commit and manifest
+        run: |
+          set -euo pipefail
+          dir=vendor/mrchromebox
+          commit=$(cat "$dir/VENDOR_COMMIT")
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error file=$dir/VENDOR_COMMIT::expected a 40-character commit sha"
+            exit 1
+          fi
+          ( cd "$dir" && sha256sum -c manifest.sha256 )
+
+      - name: Syntax
+        run: |
+          set -euo pipefail
+          for f in vendor/mrchromebox/*.sh; do
+            bash -n "$f"
+            echo "ok: $f"
+          done
+
+      # The daemon and the weekly check call these upstream functions by name.
+      # A function rename or a dropped flashrom flag must fail here, not on a
+      # Pixelbook mid-update.
+      - name: Upstream interface smoke
+        run: |
+          set -euo pipefail
+          bash -euo pipefail - <<'SH'
+          cd vendor/mrchromebox
+          source ./sources.sh
+          source ./functions.sh
+          device=eve
+          firmwareType="Full ROM / UEFI"
+          fwDate="06/27/2023"
+          for fn in clear_software_wp intel_pr_gpr_locked efi_secure_boot_enabled \
+                    flashrom_write_image fullrom_installed_yyyymmdd \
+                    fullrom_date_newer_than_installed fullrom_slot_info \
+                    fullrom_resolve_slot fullrom_slot_label fullrom_cdn_base_for_slot \
+                    fullrom_http_available; do
+            declare -F "$fn" >/dev/null || { echo "::error::functions.sh no longer defines $fn"; exit 1; }
+          done
+          installed=$(fullrom_installed_yyyymmdd)
+          [[ "$installed" == "20230627" ]] || { echo "::error::fullrom_installed_yyyymmdd returned $installed"; exit 1; }
+          fullrom_slot_info latest
+          [[ "$_fullrom_slot_date" =~ ^[0-9]{8}$ ]] || { echo "::error::fullrom_slot_info produced no date"; exit 1; }
+          rom=$(fullrom_resolve_slot latest)
+          [[ "$rom" == coreboot_edk2-eve-mrchromebox_*.rom ]] || { echo "::error::unexpected ROM name $rom"; exit 1; }
+          for var in release_current_version release_current_date fullrom_source; do
+            [[ -n "${!var:-}" ]] || { echo "::error::sources.sh no longer sets $var"; exit 1; }
+          done
+          SH
+          grep -q -- '--wp-disable' vendor/mrchromebox/functions.sh
+          grep -q -- '--wp-range' vendor/mrchromebox/functions.sh
+          grep -q 'FREG1: BIOS region' vendor/mrchromebox/functions.sh
+          echo "vendor interface smoke passed"
 
   # ---------------------------------------------------------------------------
   # Data files: TOML / JSON / XML / keyfile / systemd units / flatpak refs
@@ -424,6 +491,7 @@ jobs:
     needs:
       - shell
       - python
+      - vendor
       - data
     steps:
       - name: Aggregate result

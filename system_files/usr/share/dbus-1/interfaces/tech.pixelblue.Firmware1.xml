@@ -1,0 +1,42 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!--
+  Pixel Blue firmware update service.
+
+  Shared by the root daemon (register_object) and by out-of-tree clients.
+  The GTK updater talks to this exact interface so it can later move into a
+  Flatpak sandbox without changing a single method or signal.
+-->
+<node>
+  <interface name="tech.pixelblue.Firmware1">
+    <method name="GetStatus">
+      <arg name="status" type="a{sv}" direction="out"/>
+    </method>
+    <method name="CheckNow">
+      <arg name="started" type="b" direction="out"/>
+      <arg name="message" type="s" direction="out"/>
+    </method>
+    <method name="StartUpdate">
+      <arg name="started" type="b" direction="out"/>
+      <arg name="message" type="s" direction="out"/>
+    </method>
+    <method name="ExportBackup">
+      <arg name="ok" type="b" direction="out"/>
+      <arg name="path" type="s" direction="out"/>
+    </method>
+    <signal name="StateChanged">
+      <arg name="state" type="s"/>
+      <arg name="detail" type="s"/>
+    </signal>
+    <signal name="ProgressChanged">
+      <arg name="stage" type="s"/>
+      <arg name="percent" type="u"/>
+      <arg name="detail" type="s"/>
+    </signal>
+    <signal name="UpdateFinished">
+      <arg name="success" type="b"/>
+      <arg name="failure_class" type="s"/>
+      <arg name="detail" type="s"/>
+    </signal>
+  </interface>
+</node>

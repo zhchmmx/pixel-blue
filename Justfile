@@ -582,8 +582,9 @@ lint:
         echo "shellcheck could not be found. Please install it."
         exit 1
     fi
-    # Run shellcheck on all Bash scripts
-    find . -iname "*.sh" -type f -exec shellcheck "{}" ';'
+    # Run shellcheck on all Bash scripts. vendor/ is upstream code kept
+    # verbatim: linting it would either fail the build or force local edits.
+    find . -path ./vendor -prune -o -iname "*.sh" -type f -exec shellcheck "{}" ';'
 
 # Runs shfmt on all Bash scripts
 format:
@@ -594,5 +595,40 @@ format:
         echo "shfmt could not be found. Please install it."
         exit 1
     fi
-    # Run shfmt on all Bash scripts
-    find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
+    # Run shfmt on all Bash scripts (vendor/ is verbatim upstream code)
+    find . -path ./vendor -prune -o -iname "*.sh" -type f -exec shfmt --write "{}" ';'
+
+# Re-vendor the MrChromebox scripts at a pinned commit. The files are kept
+# byte-identical to upstream: this target only downloads, diffs and rewrites
+# VENDOR_COMMIT + manifest.sha256. Review the diff and commit it.
+[group('Firmware')]
+vendor-mrchromebox commit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    commit="{{ commit }}"
+    if [[ ! "${commit}" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "expected a 40-character commit sha, got '${commit}'" >&2
+        exit 1
+    fi
+    dir="vendor/mrchromebox"
+    mkdir -p "${dir}"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "${tmp}"' EXIT
+    for f in functions.sh sources.sh download-fullrom.sh; do
+        curl -fsSL --max-time 60 \
+            "https://raw.githubusercontent.com/MrChromebox/scripts/${commit}/${f}" \
+            -o "${tmp}/${f}"
+        bash -n "${tmp}/${f}"
+        if ! cmp -s "${tmp}/${f}" "${dir}/${f}"; then
+            echo "=== diff: ${f} (upstream ${commit} vs vendored)" >&2
+            diff -u "${dir}/${f}" "${tmp}/${f}" || true
+        fi
+    done
+    printf '%s\n' "${commit}" > "${dir}/VENDOR_COMMIT"
+    cp "${tmp}"/functions.sh "${tmp}"/sources.sh "${tmp}"/download-fullrom.sh "${dir}/"
+    # curl writes 0644; only the downloader is executed in place, the two
+    # sourced files stay read-only. Keep the modes stable across re-vendors.
+    chmod 0644 "${dir}/functions.sh" "${dir}/sources.sh" "${dir}/VENDOR_COMMIT"
+    chmod 0755 "${dir}/download-fullrom.sh"
+    ( cd "${dir}" && sha256sum functions.sh sources.sh download-fullrom.sh > manifest.sha256 )
+    echo "vendored MrChromebox scripts at ${commit}; review 'git diff ${dir}'"

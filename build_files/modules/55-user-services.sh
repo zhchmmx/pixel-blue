@@ -12,3 +12,8 @@ systemctl --global enable wacom-stylus-keyfile.service
 # login session, whether the toggle is on or off — daemon checks gsettings
 # each cycle and no-ops until the user turns it on.
 systemctl --global enable als-brightness.service
+
+# Resident firmware notifier: watches the failure marker and check.json so a
+# class-B flash failure keeps a shutdown/sleep inhibitor in place and the
+# "open updater" notification works even when the updater window is closed.
+systemctl --global enable pixel-blue-firmware-alert.service

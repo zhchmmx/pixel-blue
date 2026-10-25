@@ -2,7 +2,7 @@
 FROM scratch AS ctx
 COPY build_files /
 COPY system_files /system_files
-COPY plugin /plugin
+COPY vendor /vendor
 
 # Base Image
 FROM quay.io/fedora/fedora-silverblue:latest

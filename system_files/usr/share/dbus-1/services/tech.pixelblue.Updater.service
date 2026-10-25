@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=tech.pixelblue.Updater
+Exec=/usr/bin/pixel-blue-updater

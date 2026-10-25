@@ -1,37 +1,52 @@
 #!/usr/bin/env bash
 #
-# firmware-update-check.sh - check MrChromebox UEFI firmware updates for the
-# Pixelbook (eve) and generate the local fwupd metadata consumed by the
-# pixel-blue-mrchromebox remote (Pixel Blue, Issue #69).
+# firmware-update-check.sh - weekly MrChromebox UEFI Full ROM check for the
+# Pixelbook (eve).
 #
-# Ported from the upstream MrChromebox/scripts sources.sh/functions.sh
-# logic: parse release_current_version / release_current_date (plus the
-# per-board FW_HOTFIX override), compare the DMI BIOS release date, confirm
-# the ROM image is available, download it together with its .sha1 file,
-# verify the checksum and atomically publish firmware.xml.gz.  If the latest
-# release is already installed, publish zero-release metadata and drop any
-# stale failure marker.
+# Runs as a root systemd oneshot (firmware-update-check.timer).  It never
+# writes SPI flash: it only resolves the latest upstream release, downloads
+# and verifies the ROM image into cache/ and publishes check.json for the
+# daemon/GUI.  Flashing is exclusively user initiated through StartUpdate on
+# tech.pixelblue.Firmware1.
 #
-# Runs as a root systemd oneshot (firmware-update-check.timer).  Failures are
-# deliberately non-fatal: keep the previous metadata and let the next run
-# retry.
+# Release metadata and the installed-date helpers come from the vendored
+# upstream scripts (vendor/mrchromebox, pinned commit, CI-checked interface);
+# nothing is fetched from the network except the ROM image itself.
+#
+# Failures are deliberately non-fatal: keep the previous check.json and let
+# the next run retry.
+#
+# The vendored scripts are sourced at a runtime path and define the helpers
+# and variables used below; shellcheck cannot see through that.
+# shellcheck disable=SC1091,SC2034,SC2154
 set -euo pipefail
 
 # Testability overrides; unused in the shipped image.
-: "${MRCHROMEBOX_STATE_DIR:=/var/lib/pixel-blue/fwupd}"
+: "${MRCHROMEBOX_STATE_DIR:=/var/lib/pixel-blue/firmware}"
 : "${MRCHROMEBOX_DMI_DIR:=/sys/class/dmi/id}"
 : "${MRCHROMEBOX_EFI_DIR:=/sys/firmware/efi}"
+: "${MRCHROMEBOX_VENDOR_DIR:=/usr/lib/pixel-blue/mrchromebox}"
 : "${MRCHROMEBOX_BOARD:=eve}"
-: "${MRCHROMEBOX_SOURCES_URL:=https://raw.githubusercontent.com/MrChromebox/scripts/main/sources.sh}"
-: "${MRCHROMEBOX_BASE_URL:=https://www.mrchromebox.tech/files/firmware/full_rom/}"
 : "${MRCHROMEBOX_SKIP_DOWNLOAD:=0}"
-: "${MRCHROMEBOX_GUID:=44163a1d-13d2-42c7-bce3-fb8483125bb2}"
+: "${MRCHROMEBOX_SKIP_LOOKUP:=0}"
+: "${MRCHROMEBOX_NOTES_URL:=https://docs.mrchromebox.tech/docs/firmware/full-rom.html}"
+
+CACHE_DIR="${MRCHROMEBOX_STATE_DIR}/cache"
+CHECK_JSON="${MRCHROMEBOX_STATE_DIR}/check.json"
+MARKER="${MRCHROMEBOX_STATE_DIR}/flash-failed"
+
+BIOS_VERSION=""
+INSTALLED_YMD=""
+
+SOURCES_SH="${MRCHROMEBOX_VENDOR_DIR}/sources.sh"
+FUNCTIONS_SH="${MRCHROMEBOX_VENDOR_DIR}/functions.sh"
 
 log() {
   printf 'firmware-update-check: %s\n' "$*" >&2
 }
 
-# MM/DD/YYYY -> YYYYMMDD
+# MM/DD/YYYY -> YYYYMMDD, used only to validate the DMI date before the
+# vendored helpers parse it.
 date_to_number() {
   local m d y
   [[ "$1" =~ ^([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})$ ]] || return 1
@@ -41,20 +56,22 @@ date_to_number() {
   printf '%s' "$((10#$y * 10000 + 10#$m * 100 + 10#$d))"
 }
 
-url_available() {
-  curl -sfI -L --max-time 20 "$1" 2>/dev/null | grep -qiE '^HTTP/[0-9.]+ 200'
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 # Download "$url" (ROM) and "$url.sha1", verify the SHA-1 and move the ROM
-# into place.  Prints "sha1 sha256 size" on success, returns non-zero on any
-# failure (already logged).
+# into cache/.  Prints "sha1 sha256 size" on success.
 download_and_verify() {
   local url="$1"
   local file="$2"
   local rom_tmp sha_tmp expected actual
 
-  rom_tmp=$(mktemp -p "${MRCHROMEBOX_STATE_DIR}" firmware.rom.XXXXXX)
-  sha_tmp=$(mktemp -p "${MRCHROMEBOX_STATE_DIR}" firmware.rom.sha1.XXXXXX)
+  rom_tmp=$(mktemp -p "$CACHE_DIR" "${file}.XXXXXX") || return 1
+  sha_tmp=$(mktemp -p "$CACHE_DIR" "${file}.sha1.XXXXXX") || {
+    rm -f "$rom_tmp"
+    return 1
+  }
   if ! curl -sfL --max-time 300 "$url" -o "$rom_tmp" 2>/dev/null; then
     log "failed to download $url"
     rm -f "$rom_tmp" "$sha_tmp"
@@ -67,48 +84,28 @@ download_and_verify() {
   fi
   expected=$(awk '{print $1}' "$sha_tmp")
   actual=$(sha1sum "$rom_tmp" | awk '{print $1}')
-  if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+  if [[ ! "$expected" =~ ^[0-9a-f]{40}$ || "$expected" != "$actual" ]]; then
     log "sha1 mismatch for $file (expected ${expected:-<empty>}, got $actual)"
     rm -f "$rom_tmp" "$sha_tmp"
     return 1
   fi
-  mv -f "$rom_tmp" "${MRCHROMEBOX_STATE_DIR}/${file}"
+  mv -f "$rom_tmp" "${CACHE_DIR}/${file}"
   rm -f "$sha_tmp"
   printf '%s %s %s\n' \
     "$actual" \
-    "$(sha256sum "${MRCHROMEBOX_STATE_DIR}/${file}" | awk '{print $1}')" \
-    "$(stat -c %s "${MRCHROMEBOX_STATE_DIR}/${file}")"
-}
-
-refresh_fwupd() {
-  if ! command -v fwupdmgr >/dev/null 2>&1; then
-    log "fwupdmgr not found; the fwupd daemon reload will pick the change up"
-    return 0
-  fi
-  if ! fwupdmgr refresh pixel-blue-mrchromebox >/dev/null 2>&1; then
-    log "fwupdmgr refresh failed (non-fatal; daemon inotify reload will pick the change up)"
-  fi
-}
-
-atomically_publish() {
-  local xml_tmp="$1"
-
-  gzip -cf "$xml_tmp" >"${xml_tmp}.gz"
-  mv -f "${xml_tmp}.gz" "${MRCHROMEBOX_STATE_DIR}/firmware.xml.gz"
-  chmod 644 "${MRCHROMEBOX_STATE_DIR}/firmware.xml.gz"
-  rm -f "$xml_tmp"
-  refresh_fwupd
+    "$(sha256sum "${CACHE_DIR}/${file}" | awk '{print $1}')" \
+    "$(stat -c %s "${CACHE_DIR}/${file}")"
 }
 
 # Each dated release leaves a ~16 MB ROM behind; keep only the image the
-# published metadata currently points at ("" = none) and backup.rom.
+# published check.json currently points at ("" = none).
 cleanup_stale_roms() {
   local keep="${1:-}"
   local f
 
-  for f in "${MRCHROMEBOX_STATE_DIR}"/coreboot_edk2-*-mrchromebox_*.rom; do
+  for f in "${CACHE_DIR}"/coreboot_edk2-*-mrchromebox_*.rom; do
     [[ -e "$f" ]] || continue
-    if [[ -n "$keep" && "$f" == "${MRCHROMEBOX_STATE_DIR}/${keep}" ]]; then
+    if [[ -n "$keep" && "$f" == "${CACHE_DIR}/${keep}" ]]; then
       continue
     fi
     rm -f "$f"
@@ -116,164 +113,206 @@ cleanup_stale_roms() {
   done
 }
 
-publish_metadata_release() {
-  local version="$1"
-  local date="$2"
-  local file="$3"
-  local sha1="$4"
-  local sha256="$5"
-  local size="$6"
-  local release_date xml_tmp
-
-  release_date="${date:0:4}-${date:4:2}-${date:6:2}"
-  xml_tmp=$(mktemp -p "${MRCHROMEBOX_STATE_DIR}" firmware.xml.XXXXXX)
-  cat >"$xml_tmp" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<components version="0.9">
-  <component type="firmware">
-    <id>org.mrchromebox.pixelblue.firmware</id>
-    <name>MrChromebox UEFI Full ROM</name>
-    <summary>Custom UEFI firmware for the Google Pixelbook</summary>
-    <description><p>Update for the MrChromebox UEFI Full ROM running on this Pixelbook. Clicking Update flashes the new firmware directly. If the flash fails, the desktop alert says whether a reboot is safe (the flash was never touched) or forbidden (the write started or was interrupted); in both cases click Update again to retry.</p></description>
-    <provides>
-      <firmware type="flashed">${MRCHROMEBOX_GUID}</firmware>
-    </provides>
-    <metadata>
-      <value key="VendorId">DMI:GOOGLE</value>
-    </metadata>
-    <releases>
-      <release version="${version}" date="${release_date}">
-        <checksum type="sha1" filename="${file}">${sha1}</checksum>
-        <checksum type="sha256" filename="${file}">${sha256}</checksum>
-        <location>${file}</location>
-        <size type="download">${size}</size>
-        <size type="installed">${size}</size>
-      </release>
-    </releases>
-  </component>
-</components>
-EOF
-  atomically_publish "$xml_tmp"
+# Only a completed class-A failure may be cleared here.  Class B means the
+# SPI write was interrupted: rebooting is forbidden until a successful retry,
+# so the marker and the alert must survive an "up to date" check.
+clear_class_a_marker() {
+  local klass state
+  [[ -f "$MARKER" ]] || return 0
+  klass=$(sed -n 's/^class=//p' "$MARKER" | head -n 1)
+  state=$(sed -n 's/^state=//p' "$MARKER" | head -n 1)
+  if [[ "$state" = "failed" && "$klass" = "A" ]]; then
+    rm -f "$MARKER"
+    log "cleared stale class-A failure marker"
+  fi
 }
 
-publish_metadata_empty() {
-  local xml_tmp
-
-  xml_tmp=$(mktemp -p "${MRCHROMEBOX_STATE_DIR}" firmware.xml.XXXXXX)
-  cat >"$xml_tmp" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<components version="0.9">
-  <component type="firmware">
-    <id>org.mrchromebox.pixelblue.firmware</id>
-    <name>MrChromebox UEFI Full ROM</name>
-    <summary>Custom UEFI firmware for the Google Pixelbook</summary>
-    <description><p>MrChromebox UEFI Full ROM firmware for this Pixelbook. Updates are flashed from the GNOME Software Updates page when MrChromebox publishes a new release.</p></description>
-    <provides>
-      <firmware type="flashed">${MRCHROMEBOX_GUID}</firmware>
-    </provides>
-    <metadata>
-      <value key="VendorId">DMI:GOOGLE</value>
-    </metadata>
-    <releases />
-  </component>
-</components>
+publish_no_update() {
+  local tmp checked_at
+  checked_at=$(date +%s)
+  tmp=$(mktemp -p "$MRCHROMEBOX_STATE_DIR" check.json.XXXXXX)
+  cat >"$tmp" <<EOF
+{
+  "schema": 1,
+  "installed_version": "$(json_escape "$BIOS_VERSION")",
+  "installed_date": "${INSTALLED_YMD}",
+  "available_version": null,
+  "available_date": null,
+  "release_date": null,
+  "notes_url": "${MRCHROMEBOX_NOTES_URL}",
+  "downloaded": false,
+  "rom_file": null,
+  "sha1": null,
+  "sha256": null,
+  "size": 0,
+  "checked_at": ${checked_at}
+}
 EOF
-  atomically_publish "$xml_tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$CHECK_JSON"
+}
+
+publish_update() {
+  local available_version="$1" available_date="$2" rom_file="$3"
+  local sha1="$4" sha256="$5" size="$6"
+  local release_date tmp checked_at
+
+  release_date="${available_date:0:4}-${available_date:4:2}-${available_date:6:2}"
+  checked_at=$(date +%s)
+  tmp=$(mktemp -p "$MRCHROMEBOX_STATE_DIR" check.json.XXXXXX)
+  cat >"$tmp" <<EOF
+{
+  "schema": 1,
+  "installed_version": "$(json_escape "$BIOS_VERSION")",
+  "installed_date": "${INSTALLED_YMD}",
+  "available_version": "$(json_escape "$available_version")",
+  "available_date": "${available_date}",
+  "release_date": "${release_date}",
+  "notes_url": "${MRCHROMEBOX_NOTES_URL}",
+  "downloaded": true,
+  "rom_file": "$(json_escape "$rom_file")",
+  "sha1": "${sha1}",
+  "sha256": "${sha256}",
+  "size": ${size},
+  "checked_at": ${checked_at}
+}
+EOF
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$CHECK_JSON"
 }
 
 main() {
-  local bios_version bios_date installed
-  local sources_tmp latest_version latest_date hotfix
-  local rom_file rom_url checksum_line sha1 sha256 size
+  local bios_date installed available_version rom_file rom_url base
+  local latest_ymd
 
   # Gate 1: UEFI boot only.
   if [[ ! -d "${MRCHROMEBOX_EFI_DIR}" ]]; then
+    log "not booted in UEFI mode; nothing to do"
     return 0
   fi
   # Gate 2: custom (non-Google) firmware only.
-  bios_version=$(cat "${MRCHROMEBOX_DMI_DIR}/bios_version" 2>/dev/null) || return 0
-  if [[ "$bios_version" == Google_* ]]; then
+  BIOS_VERSION=$(cat "${MRCHROMEBOX_DMI_DIR}/bios_version" 2>/dev/null) || return 0
+  if [[ "$BIOS_VERSION" == Google_* ]]; then
+    log "still running Google stock firmware; nothing to do"
     return 0
   fi
-  # Installed firmware date.
   bios_date=$(cat "${MRCHROMEBOX_DMI_DIR}/bios_date" 2>/dev/null) || return 0
-  if ! installed=$(date_to_number "$bios_date"); then
+  if ! INSTALLED_YMD=$(date_to_number "$bios_date"); then
     log "invalid bios_date '$bios_date'"
     return 0
   fi
 
-  # Fetch and parse the upstream release info.
-  sources_tmp=$(mktemp)
-  if ! curl -sfL --max-time 30 "${MRCHROMEBOX_SOURCES_URL}" -o "$sources_tmp" 2>/dev/null; then
-    log "cannot fetch ${MRCHROMEBOX_SOURCES_URL}; keeping previous metadata"
-    rm -f "$sources_tmp"
+  mkdir -p "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR" "${MRCHROMEBOX_STATE_DIR}/export"
+  chmod 755 "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR"
+
+  # A manual CheckNow from the GUI can race the timer; serialize the whole
+  # lookup/download/publish sequence.
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"${MRCHROMEBOX_STATE_DIR}/check.lock"
+    if ! flock -w 600 9; then
+      log "another check is still running; skipping"
+      return 0
+    fi
+  else
+    log "flock not found; running without the serialization lock"
+  fi
+  # Safe only after taking the lock: another run's in-flight temp file must
+  # not be deleted from under it.
+  rm -f "${MRCHROMEBOX_STATE_DIR}"/check.json.*
+
+  if [[ ! -r "$SOURCES_SH" || ! -r "$FUNCTIONS_SH" ]]; then
+    log "vendored MrChromebox scripts missing under ${MRCHROMEBOX_VENDOR_DIR}"
     return 0
   fi
-  latest_version=$(sed -n 's/^export release_current_version="\([^"]*\)".*/\1/p' "$sources_tmp" | head -n 1)
-  latest_date=$(sed -n 's/^export release_current_date="\([0-9]\{8\}\)".*/\1/p' "$sources_tmp" | head -n 1)
-  # Only active (non-commented) hotfix entries count; upstream keeps stale
-  # entries commented out, e.g. "# [eve]=20260715".
-  hotfix=$(sed -n '/^[[:space:]]*#/d; s/.*\[eve\]=\([0-9]\{8\}\).*/\1/p' "$sources_tmp" | head -n 1)
-  rm -f "$sources_tmp"
-  if [[ -z "$latest_version" || -z "$latest_date" ]]; then
-    log "cannot parse release fields from sources.sh; keeping previous metadata"
+  # shellcheck source=/dev/null
+  if ! source "$SOURCES_SH"; then
+    log "cannot source ${SOURCES_SH}; keeping previous metadata"
     return 0
   fi
-  if [[ -n "$hotfix" ]]; then
-    latest_date="$hotfix"
+  # shellcheck source=/dev/null
+  if ! source "$FUNCTIONS_SH"; then
+    log "cannot source ${FUNCTIONS_SH}; keeping previous metadata"
+    return 0
   fi
 
-  mkdir -p "${MRCHROMEBOX_STATE_DIR}"
+  device="$MRCHROMEBOX_BOARD"
+  firmwareType="Full ROM / UEFI"
+  fwDate="$bios_date"
+  isChromeOS=false
+  isChromiumOS=false
+  isIntel=true
+  flashrom_params=""
 
-  # No update: publish zero-release metadata, drop any stale marker and all
-  # cached ROMs (nothing is pending anymore).
-  if ((installed >= latest_date)); then
-    rm -f "${MRCHROMEBOX_STATE_DIR}/flash-failed"
-    publish_metadata_empty
+  INSTALLED_YMD=$(fullrom_installed_yyyymmdd) || {
+    log "cannot parse installed firmware date '$bios_date'"
+    return 0
+  }
+  if ! fullrom_slot_info latest; then
+    log "cannot resolve the latest release from sources.sh"
+    return 0
+  fi
+  latest_ymd="$_fullrom_slot_date"
+  if [[ ! "$latest_ymd" =~ ^[0-9]{8}$ ]]; then
+    log "latest release date '$latest_ymd' is invalid"
+    return 0
+  fi
+  if ! rom_file=$(fullrom_resolve_slot latest); then
+    log "cannot build the ROM file name for ${latest_ymd}"
+    return 0
+  fi
+  if [[ "$_fullrom_slot_is_hotfix" = true ]]; then
+    available_version="hotfix-${latest_ymd}"
+  else
+    available_version="$(fullrom_slot_label latest)"
+  fi
+
+  # Nothing newer than what is already installed: publish zero-release
+  # metadata, drop a stale class-A failure marker and free the ROM cache.
+  if ! fullrom_date_newer_than_installed "$latest_ymd"; then
+    publish_no_update
     cleanup_stale_roms ""
-    log "firmware up to date (installed $installed, latest $latest_date)"
+    clear_class_a_marker
+    log "firmware up to date (installed ${INSTALLED_YMD}, latest ${latest_ymd})"
     return 0
   fi
 
-  # Update available: versioned layout, flat root fallback, hotfix flat.
-  rom_file="coreboot_edk2-${MRCHROMEBOX_BOARD}-mrchromebox_${latest_date}.rom"
-  if [[ -n "$hotfix" ]]; then
-    rom_url="${MRCHROMEBOX_BASE_URL}${rom_file}"
-  else
-    rom_url="${MRCHROMEBOX_BASE_URL}MrChromebox-${latest_version}/${rom_file}"
-    if ! url_available "$rom_url"; then
-      log "$rom_url not found; falling back to flat layout"
-      rom_url="${MRCHROMEBOX_BASE_URL}${rom_file}"
+  if ! base=$(fullrom_cdn_base_for_slot latest); then
+    log "cannot resolve the download directory for ${latest_ymd}"
+    return 0
+  fi
+  rom_url="${base}${rom_file}"
+
+  if [[ "$MRCHROMEBOX_SKIP_DOWNLOAD" != 1 && "$MRCHROMEBOX_SKIP_LOOKUP" != 1 ]]; then
+    if ! fullrom_http_available "$rom_url"; then
+      if [[ "$base" != "$fullrom_source" ]] && fullrom_http_available "${fullrom_source}${rom_file}"; then
+        rom_url="${fullrom_source}${rom_file}"
+      else
+        log "firmware image not available at ${rom_url}; keeping previous metadata"
+        return 0
+      fi
     fi
   fi
 
-  if [[ "${MRCHROMEBOX_SKIP_DOWNLOAD}" == 1 ]]; then
-    # Testing mode: the ROM must already be staged in the state dir.
-    if [[ ! -f "${MRCHROMEBOX_STATE_DIR}/${rom_file}" ]]; then
-      log "MRCHROMEBOX_SKIP_DOWNLOAD=1 but ${rom_file} is not staged; keeping previous metadata"
+  local cached="${CACHE_DIR}/${rom_file}"
+  local checksum_line sha1 sha256 size
+  if [[ "$MRCHROMEBOX_SKIP_DOWNLOAD" = 1 || "$MRCHROMEBOX_SKIP_LOOKUP" = 1 ]]; then
+    if [[ ! -f "$cached" ]]; then
+      log "staged mode but ${rom_file} is not in ${CACHE_DIR}; keeping previous metadata"
       return 0
     fi
-    sha1=$(sha1sum "${MRCHROMEBOX_STATE_DIR}/${rom_file}" | awk '{print $1}')
-    sha256=$(sha256sum "${MRCHROMEBOX_STATE_DIR}/${rom_file}" | awk '{print $1}')
-    size=$(stat -c %s "${MRCHROMEBOX_STATE_DIR}/${rom_file}")
+    sha1=$(sha1sum "$cached" | awk '{print $1}')
+    sha256=$(sha256sum "$cached" | awk '{print $1}')
+    size=$(stat -c %s "$cached")
   else
-    if ! url_available "$rom_url"; then
-      log "firmware image not available at $rom_url; keeping previous metadata"
-      return 0
-    fi
     if ! checksum_line=$(download_and_verify "$rom_url" "$rom_file"); then
       return 0
     fi
     read -r sha1 sha256 size <<<"$checksum_line"
   fi
 
-  # Publish version = release date (YYYYMMDD), the SAME version space as the
-  # plugin device (DMI bios_date as a NUMBER); upstream's release_current_version
-  # (e.g. "2609.2") is a different space and would compare as OLDER than any
-  # date - fwupd would then never show the update button.
-  publish_metadata_release "$latest_date" "$latest_date" "$rom_file" "$sha1" "$sha256" "$size"
+  publish_update "$available_version" "$latest_ymd" "$rom_file" "$sha1" "$sha256" "$size"
   cleanup_stale_roms "$rom_file"
-  log "published update metadata for ${latest_version} (${latest_date})"
+  log "published update ${available_version} (${latest_ymd}); installed ${INSTALLED_YMD}"
 }
 
 main "$@"

@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=tech.pixelblue.Firmware1
+Exec=/usr/libexec/pixel-blue-firmware-daemon
+User=root
+SystemdService=pixel-blue-firmware.service
