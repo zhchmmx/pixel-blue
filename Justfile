@@ -8,7 +8,7 @@ export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export bib_image := env_var("BIB_IMAGE")
-export jasonn3_image := env_var("JASONN3_IMAGE")
+export titanoboa_sha := env_var("TITANOBOA_SHA")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -440,58 +440,64 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build an installable anaconda ISO with jasonn3/build-container-installer
+# Build a live install ISO with ublue-os/titanoboa (issue #77)
 #
-# Unlike the BIB-based disk images, this ISO:
-#   - installs the container image from an OCI repo embedded in the ISO (offline)
-#   - preinstalls the Flatpak apps listed in flatpak_refs/ (pulled from Flathub
-#     at build time, deployed to /var/lib/flatpak at install time)
-#   - re-points the installation at the registry (bootc switch) after install
-#   - uses Anaconda's fedora-silverblue profile (VARIANT=Silverblue): the
-#     installer only asks for the destination, and account/timezone setup
-#     happens in gnome-initial-setup on first boot, like the official Fedora ISO
-#   - brands the installer environment itself via two lorax templates passed
-#     to ADDITIONAL_TEMPLATES space-delimited:
-#     disk_config/install_branding.tmpl (os-release + .buildstamp) and
-#     build_files/installer-branding.tmpl (the sidebar logo). The repo is
-#     mounted at /github/workspace, so the templates and their source PNG
-#     are addressed by their in-container paths
+# The ISO boots a GNOME live session. Anaconda installs the container image
+# from a containers-storage copy embedded in the ISO (offline), copies the
+# Flatpak apps listed in flatpak_refs/ into the target and repoints the
+# installed deployment at the signed GHCR image. The live/installer
+# environment is a second image built from Containerfile.iso and is never
+# pushed.
 #
-# Keep the jasonn3 image tag in sync with the SHA pinned for
-# jasonn3/build-container-installer in .github/workflows/build-disk.yml.
+# $target_image/$tag select the image used for the live environment; build it
+# first (or use `just rebuild-iso`). $payload_image is the registry reference
+# embedded for the offline install AND recorded as the installed system's
+# origin, so it must stay pullable; it defaults to GHCR:$tag.
+#
+# Keep TITANOBOA_SHA in image-template.env in sync with the SHA pinned for
+# ublue-os/titanoboa in .github/workflows/build-disk.yml.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
-build-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="44": (_rootful_load_image target_image tag)
+build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_image="": (_rootful_load_image target_image tag)
     #!/usr/bin/env bash
     set -euox pipefail
-    # jasonn3 wants the bare image name; strip the localhost/ prefix
-    image_name="{{ target_image }}"
-    image_name="${image_name#localhost/}"
-    mkdir -p build
-    sudo podman run \
-      --rm \
-      --pull=newer \
-      --privileged \
-      --volume "$(pwd)":/github/workspace \
-      --volume /var/lib/containers/storage:/var/lib/containers/storage \
-      --security-opt label=type:unconfined_t \
-      "{{ jasonn3_image }}" \
-      IMAGE_NAME="${image_name}" \
-      IMAGE_REPO="ghcr.io/{{ repo_organization }}" \
-      IMAGE_SRC="containers-storage:{{ target_image }}:{{ tag }}" \
-      IMAGE_TAG="{{ tag }}" \
-      VERSION="{{ version }}" \
-      VARIANT="Silverblue" \
-      ADDITIONAL_TEMPLATES="/github/workspace/disk_config/install_branding.tmpl /github/workspace/build_files/installer-branding.tmpl" \
-      FLATPAK_REMOTE_NAME="flathub" \
-      FLATPAK_REMOTE_URL="https://flathub.org/repo/flathub.flatpakrepo" \
-      FLATPAK_REMOTE_REFS_DIR="/github/workspace/flatpak_refs" \
-      ISO_NAME=/github/workspace/build/pixel-blue.iso
 
-# Rebuild the anaconda ISO (rebuilds the container image first)
+    payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
+
+    # The ISO layer installs Flatpaks and pulls the payload into its own
+    # container storage, so the nested podman needs sys_admin and unconfined
+    # labels.
+    sudo podman build \
+      --cap-add sys_admin \
+      --security-opt label=disable \
+      --build-arg BASE_IMAGE="{{ target_image }}:{{ tag }}" \
+      --build-arg PAYLOAD_IMAGE="${payload_image}" \
+      --tag "localhost/{{ image_name }}-iso:{{ tag }}" \
+      --file Containerfile.iso .
+
+    # titanoboa has no releases/tags; run main.sh from the pinned commit. It
+    # calls rootful podman itself (with build_iso.sh next to it), writes
+    # <iso-label>.iso into build/ and prints that path on stdout.
+    titanoboa_dir="$(mktemp -d)"
+    trap 'rm -rf "${titanoboa_dir}"' EXIT
+    for file in main.sh build_iso.sh; do
+      curl --fail --location --retry 3 --silent --show-error \
+        "https://raw.githubusercontent.com/ublue-os/titanoboa/{{ titanoboa_sha }}/${file}" \
+        --output "${titanoboa_dir}/${file}"
+    done
+    chmod +x "${titanoboa_dir}/main.sh" "${titanoboa_dir}/build_iso.sh"
+
+    mkdir -p build
+    iso_path="$(TITANOBOA_CTR_IMAGE="localhost/{{ image_name }}-iso:{{ tag }}" \
+      TITANOBOA_OUTPUT_DIR="${PWD}/build" \
+      "${titanoboa_dir}/main.sh")"
+    sudo chown "$(id -u):$(id -g)" "${iso_path}"
+    mv -f "${iso_path}" build/pixel-blue.iso
+
+# Rebuild the live ISO (rebuilds the container image first)
 [group('Build Virtal Machine Image')]
-rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag $version="44": (build target_image tag) && (build-iso target_image tag version)
+rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_image="": (build target_image tag) && (build-iso target_image tag payload_image)
 
 # Rebuild a QCOW2 virtual machine image
 [group('Build Virtal Machine Image')]
