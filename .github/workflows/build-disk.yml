@@ -212,3 +212,4 @@ jobs:
           rclone copy "$VERSION_PATH" S3:${{ vars.S3_BUCKET_NAME }}
           rclone copy "$ISO_PATH" S3:${{ vars.S3_BUCKET_NAME }}
           rclone copy "$CHECKSUM_PATH" S3:${{ vars.S3_BUCKET_NAME }}
+          rclone copy "$VERSION_PATH" S3:${{ vars.S3_BUCKET_NAME }}
