@@ -1,0 +1,18 @@
+cbfstool (MrChromebox util build, 2021-09-21)
+
+The cbfstool binary MrChromebox publishes for firmware-util.sh, not a Fedora
+package (Fedora ships no cbfstool/coreboot RPM). Upstream downloads the same
+tarball at run time in functions.sh:get_cbfstool(); the image vendors it so the
+persist stage never fetches an executable at run time. Taken verbatim from
+https://www.mrchromebox.tech/files/util/cbfstool.tar.gz (the tarball holds a
+single `cbfstool` binary; SHA256 records its checksum).
+
+The image extracts it to /usr/lib/pixel-blue/mrchromebox/cbfstool. It is a
+dynamically linked glibc build whose only shared-library dependency is libc, so
+it runs unmodified on the Fedora image; build_files/modules/42-firmware.sh runs
+it after extraction and fails the build if it cannot start.
+
+Refresh by downloading a new tarball from the same directory, replacing
+cbfstool.tar.gz, regenerating SHA256 and updating this file; then verify that
+42-firmware.sh's smoke test still passes and that the flags the persist stage
+uses (`add`, `extract`, `read -r`, `write -r`, `-t raw`) are unchanged.

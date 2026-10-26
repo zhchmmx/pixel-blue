@@ -3,9 +3,11 @@
 #
 # Updates are handled by the fwupd plugin built from build_files/fwupd-plugin:
 # it exposes the MrChromebox UEFI Full ROM as a fwupd device and drives the
-# vendored MrChromebox helpers. flashrom is the build MrChromebox publishes for
-# firmware-util.sh, vendored in vendor/flashrom and extracted below: updates
-# never download a programmer binary at runtime.
+# vendored MrChromebox helpers. flashrom and cbfstool are the builds
+# MrChromebox publishes for firmware-util.sh, vendored in vendor/ and extracted
+# below: updates never download a tool at runtime. cbfstool carries the
+# device's own serial number, HWID, VPD, RW_MRC_CACHE and SMMSTORE into the
+# release image before the write, exactly as upstream flash_full_rom() does.
 #
 # Fedora's fwupd-devel ships fwupd.h/libfwupd only, not the libfwupdplugin
 # headers a plugin compiles against, so vendor/fwupd carries the pinned
@@ -69,6 +71,19 @@ chmod 0755 /usr/lib/pixel-blue/mrchromebox/flashrom
 # Fail the build rather than ship a binary that cannot start on this image; the
 # plugin probes the same binary again before it touches the flash.
 /usr/lib/pixel-blue/mrchromebox/flashrom -h >/dev/null
+
+# cbfstool: the same vendor build firmware-util.sh downloads, used by the
+# persist stage. Fedora ships no cbfstool/coreboot package.
+(cd /ctx/vendor/cbfstool && sha256sum -c SHA256)
+tar -xzf /ctx/vendor/cbfstool/cbfstool.tar.gz -C /usr/lib/pixel-blue/mrchromebox
+chmod 0755 /usr/lib/pixel-blue/mrchromebox/cbfstool
+# cbfstool has no success exit path for -h or an empty argument list: both print
+# the usage banner and exit 1, so check the banner rather than the status.
+if ! { /usr/lib/pixel-blue/mrchromebox/cbfstool 2>&1 || true; } |
+  grep -q "Management utility for CBFS"; then
+  echo "42-firmware: the vendored cbfstool does not start" >&2
+  exit 1
+fi
 
 install -m 0644 /ctx/vendor/mrchromebox/functions.sh /usr/lib/pixel-blue/mrchromebox/functions.sh
 install -m 0644 /ctx/vendor/mrchromebox/sources.sh /usr/lib/pixel-blue/mrchromebox/sources.sh

@@ -4,9 +4,12 @@
  * The image never ships a general purpose firmware updater: the only thing
  * this device knows how to do is drive the vendored MrChromebox helpers, which
  * are the same code path the upstream firmware-util.sh TUI uses, with the same
- * flashrom binary it downloads. Nothing is fetched at run time and nothing
- * links libflashrom, so the plugin keeps working when the vendored helpers
- * change.
+ * flashrom and cbfstool binaries it downloads. The write is the upstream
+ * sequence: a BIOS-region read, the per-device data injected back into the
+ * release image with cbfstool, one retry, and a restore from the read image
+ * before the update is declared failed. Nothing is fetched at run time and
+ * nothing links libflashrom, so the plugin keeps working when the vendored
+ * helpers change.
  *
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
@@ -24,15 +27,20 @@
 
 #define FU_MRCHROMEBOX_VENDOR_DIR "/usr/lib/pixel-blue/mrchromebox"
 #define FU_MRCHROMEBOX_STATE_DIR  "/var/lib/pixel-blue/firmware"
-/* the build MrChromebox publishes for firmware-util.sh, vendored in the image */
+/* the builds MrChromebox publishes for firmware-util.sh, vendored in the image */
 #define FU_MRCHROMEBOX_FLASHROM   FU_MRCHROMEBOX_VENDOR_DIR "/flashrom"
+#define FU_MRCHROMEBOX_CBFSTOOL   FU_MRCHROMEBOX_VENDOR_DIR "/cbfstool"
 
 /* flashrom can hang on a wedged SPI controller, so every call is bounded */
-#define FU_MRCHROMEBOX_TIMEOUT_PROBE  60
-#define FU_MRCHROMEBOX_TIMEOUT_READ   300
-#define FU_MRCHROMEBOX_TIMEOUT_WP     120
-#define FU_MRCHROMEBOX_TIMEOUT_WRITE  900
-#define FU_MRCHROMEBOX_TIMEOUT_VERIFY 600
+#define FU_MRCHROMEBOX_TIMEOUT_PROBE   60
+#define FU_MRCHROMEBOX_TIMEOUT_READ    300
+#define FU_MRCHROMEBOX_TIMEOUT_WP      120
+#define FU_MRCHROMEBOX_TIMEOUT_WRITE   900
+#define FU_MRCHROMEBOX_TIMEOUT_VERIFY  600
+#define FU_MRCHROMEBOX_TIMEOUT_PERSIST 300
+
+/* upstream writes boardName in upper case when the firmware carries no HWID */
+#define FU_MRCHROMEBOX_BOARD_NAME "EVE"
 
 /* the Pixelbook ships a 16 MiB SPI flash; keep a generous sanity bound */
 #define FU_MRCHROMEBOX_SIZE_MIN (1 * 1024 * 1024)
@@ -42,7 +50,10 @@ struct _FuMrchromeboxDevice {
 	FuDevice parent_instance;
 	gchar *flashrom_path;
 	gchar *rom_path;
+	gchar *current_path;
+	gchar *staged_path;
 	gchar *log_path;
+	gchar *tmp_dir;
 	gchar *sw_wp;
 	gboolean has_ifd;
 	gboolean first_chip;
@@ -57,7 +68,10 @@ fu_mrchromebox_device_finalize(GObject *object)
 	FuMrchromeboxDevice *self = FU_MRCHROMEBOX_DEVICE(object);
 	g_free(self->flashrom_path);
 	g_free(self->rom_path);
+	g_free(self->current_path);
+	g_free(self->staged_path);
 	g_free(self->log_path);
+	g_free(self->tmp_dir);
 	g_free(self->sw_wp);
 	G_OBJECT_CLASS(fu_mrchromebox_device_parent_class)->finalize(object);
 }
@@ -78,6 +92,8 @@ fu_mrchromebox_device_new(FuContext *ctx)
 {
 	FuMrchromeboxDevice *self = g_object_new(FU_TYPE_MRCHROMEBOX_DEVICE, "context", ctx, NULL);
 	self->rom_path = g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "update.rom", NULL);
+	self->current_path = g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "current.rom", NULL);
+	self->staged_path = g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "staged.rom", NULL);
 	self->log_path = g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "mrchromebox.log", NULL);
 	return FU_DEVICE(self);
 }
@@ -138,8 +154,15 @@ fu_mrchromebox_spawn(GPtrArray *argv, guint timeout_sec, gchar **output, GError 
 			    error_local->message);
 		return -1;
 	}
-	if (!WIFEXITED(status))
+	if (!WIFEXITED(status)) {
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_INTERNAL,
+			    "'%s' did not exit after %u seconds",
+			    (const gchar *)g_ptr_array_index(argv, 0),
+			    timeout_sec);
 		return -1;
+	}
 	return WEXITSTATUS(status);
 }
 
@@ -152,14 +175,28 @@ fu_mrchromebox_run_bash(const gchar *script,
 			const gchar *arg4,
 			const gchar *arg5,
 			const gchar *arg6,
+			const gchar *arg7,
 			guint timeout_sec,
 			gchar **output,
 			GError **error)
 {
 	g_autoptr(GPtrArray) argv = g_ptr_array_new();
+	/*
+	 * coreutils timeout signals only its direct child, which here is bash, so
+	 * a flashrom grandchild would survive the kill and keep driving the SPI
+	 * chip while the caller reports failure. timeout puts that bash in its own
+	 * process group, so background the snippet and kill group 0 from the TERM
+	 * trap: no descendant outlives the timeout. The snippet needs backgrounding
+	 * because non-interactive bash defers traps until a foreground child exits.
+	 */
+	g_autofree gchar *wrapped = g_strdup_printf("trap 'kill -KILL 0' TERM\n"
+						    "(\n%s\n) &\n"
+						    "child=$!\n"
+						    "wait \"$child\"\n",
+						    script);
 	g_ptr_array_add(argv, (gpointer)"/bin/bash");
 	g_ptr_array_add(argv, (gpointer)"-c");
-	g_ptr_array_add(argv, (gpointer)script);
+	g_ptr_array_add(argv, (gpointer)wrapped);
 	g_ptr_array_add(argv, (gpointer)"pixel-blue-fwupd");
 	g_ptr_array_add(argv, (gpointer)arg1);
 	g_ptr_array_add(argv, (gpointer)arg2);
@@ -167,6 +204,7 @@ fu_mrchromebox_run_bash(const gchar *script,
 	g_ptr_array_add(argv, (gpointer)arg4);
 	g_ptr_array_add(argv, (gpointer)arg5);
 	g_ptr_array_add(argv, (gpointer)arg6);
+	g_ptr_array_add(argv, (gpointer)arg7);
 	return fu_mrchromebox_spawn(argv, timeout_sec, output, error);
 }
 
@@ -307,6 +345,7 @@ fu_mrchromebox_device_protection_range_ok(const gchar *probe_output, GError **er
 	gint rc = fu_mrchromebox_run_bash(script,
 					  FU_MRCHROMEBOX_VENDOR_DIR,
 					  probe_output,
+					  NULL,
 					  NULL,
 					  NULL,
 					  NULL,
@@ -472,7 +511,6 @@ fu_mrchromebox_device_backup(FuMrchromeboxDevice *self, GError **error)
 	g_autofree gchar *backup = g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "backup.rom", NULL);
 	g_autofree gchar *json_path =
 	    g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "backup.json", NULL);
-	g_autofree gchar *region = g_strconcat(backup, ".region", NULL);
 	g_autofree gchar *full = g_strconcat(backup, ".full", NULL);
 	const gchar *version = fu_device_get_version(FU_DEVICE(self));
 	g_autofree gchar *json_old = NULL;
@@ -485,11 +523,36 @@ fu_mrchromebox_device_backup(FuMrchromeboxDevice *self, GError **error)
 	g_autoptr(GDateTime) now = g_date_time_new_now_local();
 	g_autoptr(GPtrArray) argv = NULL;
 	GStatBuf st = {0};
-	const gchar *keep = NULL;
 	const gchar *scope = "bios-region";
 	gint rc;
 
 	g_mkdir_with_parents(FU_MRCHROMEBOX_STATE_DIR, 0755);
+
+	/*
+	 * The BIOS region is mandatory: it is what the restore would write back
+	 * and what the persist stage reads the per-device data from, so it is
+	 * always read fresh rather than reused.
+	 */
+	g_unlink(self->current_path);
+	argv = g_ptr_array_new();
+	fu_mrchromebox_add_flashrom_base(self, argv);
+	g_ptr_array_add(argv, (gpointer)"--ifd");
+	g_ptr_array_add(argv, (gpointer)"-i");
+	g_ptr_array_add(argv, (gpointer)"bios");
+	g_ptr_array_add(argv, (gpointer)"-r");
+	g_ptr_array_add(argv, (gpointer)self->current_path);
+	rc = fu_mrchromebox_spawn(argv, FU_MRCHROMEBOX_TIMEOUT_READ, &output, error);
+	if (rc < 0)
+		return FALSE;
+	if (rc != 0 || !g_file_test(self->current_path, G_FILE_TEST_IS_REGULAR)) {
+		g_unlink(self->current_path);
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_READ,
+			    "cannot read the BIOS region, refusing to touch the flash: %s",
+			    fu_mrchromebox_output_tail(output));
+		return FALSE;
+	}
 
 	/*
 	 * A retry must not overwrite the good pre-failure backup with the
@@ -509,29 +572,6 @@ fu_mrchromebox_device_backup(FuMrchromeboxDevice *self, GError **error)
 		}
 	}
 
-	/* the BIOS region is mandatory: it decides the write parameters */
-	g_unlink(region);
-	argv = g_ptr_array_new();
-	fu_mrchromebox_add_flashrom_base(self, argv);
-	g_ptr_array_add(argv, (gpointer)"--ifd");
-	g_ptr_array_add(argv, (gpointer)"-i");
-	g_ptr_array_add(argv, (gpointer)"bios");
-	g_ptr_array_add(argv, (gpointer)"-r");
-	g_ptr_array_add(argv, (gpointer)region);
-	rc = fu_mrchromebox_spawn(argv, FU_MRCHROMEBOX_TIMEOUT_READ, &output, error);
-	if (rc < 0)
-		return FALSE;
-	if (rc != 0 || !g_file_test(region, G_FILE_TEST_IS_REGULAR)) {
-		g_unlink(region);
-		g_set_error(error,
-			    FWUPD_ERROR,
-			    FWUPD_ERROR_READ,
-			    "cannot back up the BIOS region, refusing to touch the flash: %s",
-			    fu_mrchromebox_output_tail(output));
-		return FALSE;
-	}
-	keep = region;
-
 	/* a full-chip dump is what an external CH341A restore wants */
 	g_clear_pointer(&argv, g_ptr_array_unref);
 	g_clear_pointer(&output, g_free);
@@ -545,22 +585,24 @@ fu_mrchromebox_device_backup(FuMrchromeboxDevice *self, GError **error)
 		return FALSE;
 	if (rc == 0 && g_file_test(full, G_FILE_TEST_IS_REGULAR)) {
 		scope = "full-chip";
-		keep = full;
+		if (g_rename(full, backup) != 0) {
+			g_set_error(error,
+				    FWUPD_ERROR,
+				    FWUPD_ERROR_INTERNAL,
+				    "cannot store the firmware backup at %s",
+				    backup);
+			return FALSE;
+		}
 	} else {
+		g_autoptr(GFile) src = g_file_new_for_path(self->current_path);
+		g_autoptr(GFile) dst = g_file_new_for_path(backup);
 		g_unlink(full);
 		g_debug("full-chip backup unavailable, keeping the BIOS region");
+		if (!g_file_copy(src, dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, error))
+			return FALSE;
 	}
 
-	if (g_rename(keep, backup) != 0) {
-		g_set_error(error,
-			    FWUPD_ERROR,
-			    FWUPD_ERROR_INTERNAL,
-			    "cannot store the firmware backup at %s",
-			    backup);
-		return FALSE;
-	}
 	g_chmod(backup, 0600);
-	g_unlink(region);
 	g_unlink(full);
 
 	sha256 = fu_mrchromebox_sha256_file(backup);
@@ -592,6 +634,103 @@ fu_mrchromebox_device_backup(FuMrchromeboxDevice *self, GError **error)
 	return TRUE;
 }
 
+/*
+ * Upstream flash_full_rom() rebuilds the release image with the device's own
+ * data before writing it: serial_number and hwid as CBFS files, plus RO_VPD,
+ * RW_MRC_CACHE and SMMSTORE taken from the BIOS-region read. All of those live
+ * inside the region this write replaces, so skipping the stage would reset the
+ * UEFI variable store and drop the serial/VPD on every update.
+ */
+static gboolean
+fu_mrchromebox_device_stage(FuMrchromeboxDevice *self, GError **error)
+{
+	static const gchar *script =
+	    "set -euo pipefail\n"
+	    "cbfstool=\"$1\"\n"
+	    "src=\"$2\"\n"
+	    "rom=\"$3\"\n"
+	    "staged=\"$4\"\n"
+	    "tmp=\"$5\"\n"
+	    "board=\"$6\"\n"
+	    "cp \"$rom\" \"$staged\" || { echo \"cannot stage the release image\" >&2; exit 20; }\n"
+	    "if \"$cbfstool\" \"$src\" extract -n serial_number -f \"$tmp/serial.txt\" >/dev/null 2>&1 &&\n"
+	    "   [ -s \"$tmp/serial.txt\" ]; then\n"
+	    "\tif ! \"$cbfstool\" \"$staged\" add -n serial_number -f \"$tmp/serial.txt\" -t raw >/dev/null 2>&1; then\n"
+	    "\t\techo \"cannot persist the device serial number\" >&2\n"
+	    "\t\texit 21\n"
+	    "\tfi\n"
+	    "fi\n"
+	    "if ! \"$cbfstool\" \"$src\" extract -n hwid -f \"$tmp/hwid.txt\" >/dev/null 2>&1 ||\n"
+	    "   [ ! -s \"$tmp/hwid.txt\" ]; then\n"
+	    "\tprintf '%s\\n' \"$board\" > \"$tmp/hwid.txt\"\n"
+	    "fi\n"
+	    "if ! \"$cbfstool\" \"$staged\" add -n hwid -f \"$tmp/hwid.txt\" -t raw >/dev/null 2>&1; then\n"
+	    "\techo \"cannot persist the device HWID\" >&2\n"
+	    "\texit 22\n"
+	    "fi\n"
+	    "if \"$cbfstool\" \"$src\" read -r RW_MRC_CACHE -f \"$tmp/mrc.cache\" >/dev/null 2>&1; then\n"
+	    "\tif ! \"$cbfstool\" \"$staged\" write -r RW_MRC_CACHE -f \"$tmp/mrc.cache\" >/dev/null 2>&1; then\n"
+	    "\t\techo \"cannot persist RW_MRC_CACHE\" >&2\n"
+	    "\t\texit 23\n"
+	    "\tfi\n"
+	    "fi\n"
+	    "if \"$cbfstool\" \"$src\" read -r SMMSTORE -f \"$tmp/smmstore\" >/dev/null 2>&1; then\n"
+	    "\tif ! \"$cbfstool\" \"$staged\" write -r SMMSTORE -f \"$tmp/smmstore\" >/dev/null 2>&1; then\n"
+	    "\t\techo \"cannot persist SMMSTORE\" >&2\n"
+	    "\t\texit 24\n"
+	    "\tfi\n"
+	    "fi\n"
+	    "if \"$cbfstool\" \"$src\" read -r RO_VPD -f \"$tmp/vpd.bin\" >/dev/null 2>&1 ||\n"
+	    "   \"$cbfstool\" \"$src\" extract -n vpd.bin -f \"$tmp/vpd.bin\" >/dev/null 2>&1; then\n"
+	    "\tif ! \"$cbfstool\" \"$staged\" write -r RO_VPD -f \"$tmp/vpd.bin\" >/dev/null 2>&1 &&\n"
+	    "\t   ! \"$cbfstool\" \"$staged\" add -n vpd.bin -f \"$tmp/vpd.bin\" -t raw >/dev/null 2>&1; then\n"
+	    "\t\techo \"cannot persist the VPD\" >&2\n"
+	    "\t\texit 25\n"
+	    "\tfi\n"
+	    "fi\n";
+	g_autofree gchar *output = NULL;
+	gint rc;
+
+	if (!g_file_test(FU_MRCHROMEBOX_CBFSTOOL, G_FILE_TEST_IS_EXECUTABLE)) {
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_NOT_SUPPORTED,
+			    "the vendored cbfstool %s is missing",
+			    FU_MRCHROMEBOX_CBFSTOOL);
+		return FALSE;
+	}
+	if (self->tmp_dir == NULL) {
+		g_set_error_literal(error,
+				    FWUPD_ERROR,
+				    FWUPD_ERROR_INTERNAL,
+				    "no temporary directory for the persist stage");
+		return FALSE;
+	}
+	rc = fu_mrchromebox_run_bash(script,
+				     FU_MRCHROMEBOX_CBFSTOOL,
+				     self->current_path,
+				     self->rom_path,
+				     self->staged_path,
+				     self->tmp_dir,
+				     FU_MRCHROMEBOX_BOARD_NAME,
+				     NULL,
+				     FU_MRCHROMEBOX_TIMEOUT_PERSIST,
+				     &output,
+				     error);
+	if (rc < 0)
+		return FALSE;
+	if (rc != 0) {
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_WRITE,
+			    "cannot carry the device data into the release image; "
+			    "the flash was not modified: %s",
+			    fu_mrchromebox_output_tail(output));
+		return FALSE;
+	}
+	return TRUE;
+}
+
 static gboolean
 fu_mrchromebox_device_clear_software_wp(FuMrchromeboxDevice *self, GError **error)
 {
@@ -611,6 +750,7 @@ fu_mrchromebox_device_clear_software_wp(FuMrchromeboxDevice *self, GError **erro
 					  self->log_path,
 					  NULL,
 					  NULL,
+					  NULL,
 					  FU_MRCHROMEBOX_TIMEOUT_WP,
 					  &output,
 					  error);
@@ -627,7 +767,7 @@ fu_mrchromebox_device_clear_software_wp(FuMrchromeboxDevice *self, GError **erro
 }
 
 static gboolean
-fu_mrchromebox_device_flash(FuMrchromeboxDevice *self, GError **error)
+fu_mrchromebox_device_flash(FuMrchromeboxDevice *self, const gchar *image, GError **error)
 {
 	static const gchar *script =
 	    "set -euo pipefail\n"
@@ -646,10 +786,12 @@ fu_mrchromebox_device_flash(FuMrchromeboxDevice *self, GError **error)
 	gint rc = fu_mrchromebox_run_bash(script,
 					  FU_MRCHROMEBOX_VENDOR_DIR,
 					  flashrom_cmd,
-					  self->noverify ? "-N" : "",
+					  /* upstream falls back to -n when -N is unsupported */
+					  self->noverify ? "-N" : "-n",
 					  "--ifd -i bios",
 					  self->log_path,
-					  self->rom_path,
+					  image,
+					  NULL,
 					  FU_MRCHROMEBOX_TIMEOUT_WRITE,
 					  &output,
 					  error);
@@ -659,8 +801,7 @@ fu_mrchromebox_device_flash(FuMrchromeboxDevice *self, GError **error)
 		g_set_error(error,
 			    FWUPD_ERROR,
 			    FWUPD_ERROR_WRITE,
-			    "the SPI flash write failed or was interrupted. "
-			    "Do NOT reboot: retry the update first. %s",
+			    "the SPI flash write failed or was interrupted: %s",
 			    fu_mrchromebox_output_tail(output));
 		return FALSE;
 	}
@@ -668,7 +809,7 @@ fu_mrchromebox_device_flash(FuMrchromeboxDevice *self, GError **error)
 }
 
 static gboolean
-fu_mrchromebox_device_verify(FuMrchromeboxDevice *self, GError **error)
+fu_mrchromebox_device_verify(FuMrchromeboxDevice *self, const gchar *image, GError **error)
 {
 	g_autoptr(GPtrArray) argv = g_ptr_array_new();
 	g_autofree gchar *output = NULL;
@@ -679,7 +820,7 @@ fu_mrchromebox_device_verify(FuMrchromeboxDevice *self, GError **error)
 	g_ptr_array_add(argv, (gpointer)"-i");
 	g_ptr_array_add(argv, (gpointer)"bios");
 	g_ptr_array_add(argv, (gpointer)"-v");
-	g_ptr_array_add(argv, (gpointer)self->rom_path);
+	g_ptr_array_add(argv, (gpointer)image);
 	rc = fu_mrchromebox_spawn(argv, FU_MRCHROMEBOX_TIMEOUT_VERIFY, &output, error);
 	if (rc < 0)
 		return FALSE;
@@ -687,12 +828,24 @@ fu_mrchromebox_device_verify(FuMrchromeboxDevice *self, GError **error)
 		g_set_error(error,
 			    FWUPD_ERROR,
 			    FWUPD_ERROR_WRITE,
-			    "verifying the written image failed. "
-			    "Do NOT reboot: retry the update first. %s",
+			    "verifying the written image failed: %s",
 			    fu_mrchromebox_output_tail(output));
 		return FALSE;
 	}
 	return TRUE;
+}
+
+static gboolean
+fu_mrchromebox_device_write_verified(FuMrchromeboxDevice *self,
+				     const gchar *image,
+				     FuProgress *progress,
+				     GError **error)
+{
+	fu_progress_set_status(progress, FWUPD_STATUS_DEVICE_WRITE);
+	if (!fu_mrchromebox_device_flash(self, image, error))
+		return FALSE;
+	fu_progress_set_status(progress, FWUPD_STATUS_DEVICE_VERIFY);
+	return fu_mrchromebox_device_verify(self, image, error);
 }
 
 /* --- FuDevice vfuncs ---------------------------------------------------- */
@@ -744,15 +897,61 @@ fu_mrchromebox_device_write_firmware(FuDevice *device,
 	if (g_chmod(self->rom_path, 0600) != 0)
 		g_debug("cannot tighten the permissions of %s", self->rom_path);
 
+	/* the persist stage needs a scratch area for the extracted regions */
+	g_clear_pointer(&self->tmp_dir, g_free);
+	self->tmp_dir = g_dir_make_tmp("pixel-blue-fwupd-XXXXXX", error);
+	if (self->tmp_dir == NULL)
+		return FALSE;
+	if (!fu_mrchromebox_device_stage(self, error))
+		return FALSE;
+
 	/* nothing below here is recoverable by a reboot alone */
 	if (!fu_mrchromebox_device_clear_software_wp(self, error))
 		return FALSE;
-	if (!fu_mrchromebox_device_flash(self, error))
-		return FALSE;
 
-	fu_progress_set_status(progress, FWUPD_STATUS_DEVICE_VERIFY);
-	if (!fu_mrchromebox_device_verify(self, error))
-		return FALSE;
+	/*
+	 * Upstream writes once, retries once, and only then writes the image read
+	 * in prepare back before declaring failure. fwupd holds its logind
+	 * inhibitor for this whole call, so attempts and restore stay inside it.
+	 */
+	g_autoptr(GError) error_attempt = NULL;
+	if (!fu_mrchromebox_device_write_verified(self, self->staged_path, progress, &error_attempt)) {
+		g_autofree gchar *backup =
+		    g_build_filename(FU_MRCHROMEBOX_STATE_DIR, "backup.rom", NULL);
+
+		g_debug("first flash attempt failed: %s", error_attempt->message);
+		g_clear_error(&error_attempt);
+		if (!fu_mrchromebox_device_write_verified(self,
+							  self->staged_path,
+							  progress,
+							  &error_attempt)) {
+			g_autoptr(GError) error_restore = NULL;
+
+			g_debug("second flash attempt failed: %s", error_attempt->message);
+			if (fu_mrchromebox_device_write_verified(self,
+								  backup,
+								  progress,
+								  &error_restore)) {
+				g_set_error(error,
+					    FWUPD_ERROR,
+					    FWUPD_ERROR_WRITE,
+					    "the SPI flash write failed twice; the firmware "
+					    "read before the update was written back and "
+					    "verified, so the device should still boot. "
+					    "Reboot, then retry the update. %s",
+					    error_attempt->message);
+				return FALSE;
+			}
+			g_set_error(error,
+				    FWUPD_ERROR,
+				    FWUPD_ERROR_WRITE,
+				    "the SPI flash write failed twice and writing the "
+				    "previous firmware back failed too. Do NOT reboot: "
+				    "seek recovery help. %s",
+				    error_attempt->message);
+			return FALSE;
+		}
+	}
 
 	/* fwupd reads DMI again after the reboot and clears this then */
 	fu_device_add_flag(device, FWUPD_DEVICE_FLAG_NEEDS_REBOOT);
@@ -766,7 +965,22 @@ fu_mrchromebox_device_cleanup(FuDevice *device,
 			      GError **error)
 {
 	FuMrchromeboxDevice *self = FU_MRCHROMEBOX_DEVICE(device);
+
 	g_unlink(self->rom_path);
+	g_unlink(self->staged_path);
+	g_unlink(self->current_path);
+	if (self->tmp_dir != NULL) {
+		g_autoptr(GPtrArray) argv = g_ptr_array_new();
+		g_autoptr(GError) error_local = NULL;
+		g_autofree gchar *output = NULL;
+
+		g_ptr_array_add(argv, (gpointer)"rm");
+		g_ptr_array_add(argv, (gpointer)"-rf");
+		g_ptr_array_add(argv, (gpointer)self->tmp_dir);
+		if (fu_mrchromebox_spawn(argv, 60, &output, &error_local) < 0)
+			g_debug("cannot remove %s: %s", self->tmp_dir, error_local->message);
+		g_clear_pointer(&self->tmp_dir, g_free);
+	}
 	g_clear_pointer(&self->sw_wp, g_free);
 	return TRUE;
 }

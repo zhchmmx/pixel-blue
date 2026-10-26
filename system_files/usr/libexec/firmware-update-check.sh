@@ -5,10 +5,11 @@
 #
 # Runs as a root systemd oneshot (firmware-update-check.timer).  It never
 # writes SPI flash: it resolves the latest upstream release, downloads and
-# verifies the ROM image, wraps it into a fwupd cabinet under cab/ and lets
-# fwupd re-read that directory remote.  Installing is exclusively user
-# initiated through fwupd (`fwupdmgr update`), which drives the mrchromebox
-# plugin; that plugin owns preflight, backup, write protection and flashing.
+# verifies the ROM image, wraps it into a fwupd cabinet under cab/.  fwupd
+# watches that directory and rebuilds its metadata by itself, so publishing a
+# cabinet needs no refresh call.  Installing is exclusively user initiated
+# through fwupd (`fwupdmgr update`), which drives the mrchromebox plugin; that
+# plugin owns preflight, backup, write protection and flashing.
 #
 # Release metadata and the installed-date helpers come from the vendored
 # upstream scripts (vendor/mrchromebox, pinned commit, CI-checked interface);
@@ -136,10 +137,11 @@ cleanup_stale_cabs() {
   done
 }
 
-# Wrap the verified ROM in a cabinet fwupd understands.  The appliance never
-# signs its metadata (fwupd.conf sets OnlyTrusted=false): the payload is
-# already pinned to the upstream .sha1 and the cabinet is generated locally
-# from that exact file.
+# Wrap the verified ROM in a cabinet fwupd understands.  Nothing signs this
+# metadata: fwupd treats every release from a directory remote as trusted
+# (fu-release.c, fu_release_ensure_trust_flags) without touching the
+# OnlyTrusted default, and the payload is already pinned to the upstream .sha1
+# because the cabinet is generated locally from that exact file.
 build_cabinet() {
   local version="$1" date_ymd="$2" rom_name="$3" sha256="$4" size="$5"
   local release_date tmpdir label
@@ -192,16 +194,6 @@ EOF
     return 1
   }
   rm -rf "$tmpdir"
-}
-
-# fwupd caches the directory remote after each refresh; ask the daemon to
-# rebuild it now so the update shows up without waiting for the next start.
-refresh_metadata() {
-  if ! fwupdmgr refresh --force >/dev/null 2>&1; then
-    log "fwupdmgr refresh failed; the daemon will pick the cabinet up later"
-    return 1
-  fi
-  return 0
 }
 
 main() {
@@ -294,7 +286,6 @@ main() {
   if ! fullrom_date_newer_than_installed "$latest_ymd"; then
     cleanup_stale_cabs ""
     cleanup_stale_roms ""
-    refresh_metadata || true
     log "firmware up to date (installed ${INSTALLED_YMD}, latest ${latest_ymd})"
     return 0
   fi
@@ -302,7 +293,6 @@ main() {
   # Already published for this release: nothing to download again.
   if [[ -s "${CAB_DIR}/${cab_name}" && "$MRCHROMEBOX_SKIP_DOWNLOAD" != 1 ]]; then
     cleanup_stale_cabs "$cab_name"
-    refresh_metadata || true
     log "cabinet for ${available_version} already published"
     return 0
   fi
@@ -347,7 +337,6 @@ main() {
 
   cleanup_stale_cabs "$cab_name"
   cleanup_stale_roms "$rom_file"
-  refresh_metadata || true
   log "published ${cab_name} (${label:-${latest_ymd}}); installed ${INSTALLED_YMD}"
 }
 
