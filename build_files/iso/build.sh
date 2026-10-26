@@ -242,7 +242,13 @@ sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
 cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
 # Pixel Blue live install (titanoboa, issue #77).
-%include /usr/share/anaconda/post-scripts/install-flatpaks.ks
+# These %includes are load-bearing, not backup: Anaconda's
+  # appendPostScripts() merge of /usr/share/anaconda/post-scripts feeds only
+  # the main-process ksdata, while %post execution goes through the DBus
+  # ScriptsModule, which sees just the scripts from the parsed kickstart
+  # (includes expanded). A post-script not %include'd here runs zero times
+  # on Fedora 44 — keep this list in sync when adding one.
+  %include /usr/share/anaconda/post-scripts/install-flatpaks.ks
 %include /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
 %include /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
