@@ -194,12 +194,26 @@ jobs:
           RCLONE_CONFIG_S3_REGION: ${{ vars.S3_REGION }}
           RCLONE_CONFIG_S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
           ISO_PATH: ${{ steps.checksum.outputs.iso-path }}
-          CHECKSUM_PATH: ${{ steps.checksum.outputs.checksum-path }}
         run: |
           sudo apt-get update
           sudo apt-get install -y rclone
+          # Version comes from the payload image's OCI label, which build.yml
+          # stamps with its own run number. Using THIS workflow's run_number
+          # would diverge from the version reported by the installed system
+          # (bootc status), so only fall back to it if the label is missing.
+          VERSION="$(skopeo inspect "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            | jq -r '.Labels["org.opencontainers.image.version"]')"
+          if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+            VERSION="$(date -u +%Y%m%d).${{ github.run_number }}"
+          fi
           VERSION_PATH="$(dirname "$ISO_PATH")/pixel-blue.iso.version"
-          echo "$(date -u +%Y%m%d).${{ github.run_number }}" > "$VERSION_PATH"
-          rclone copy "$ISO_PATH" S3:${{ vars.S3_BUCKET_NAME }}
-          rclone copy "$CHECKSUM_PATH" S3:${{ vars.S3_BUCKET_NAME }}
-          rclone copy "$VERSION_PATH" S3:${{ vars.S3_BUCKET_NAME }}
+          echo "$VERSION" > "$VERSION_PATH"
+          # One rclone invocation for the whole directory (iso + checksum +
+          # version), like the qcow2 job: with the default --transfers 4 the
+          # small files go up concurrently with the ISO, avoiding a lone
+          # request right after the bulk multipart upload that the endpoint
+          # answers with 403/501. --include keeps other runner.temp junk out.
+          rclone copy "$(dirname "$ISO_PATH")" S3:${{ vars.S3_BUCKET_NAME }} \
+            --include "pixel-blue.iso" \
+            --include "pixel-blue.iso-CHECKSUM" \
+            --include "pixel-blue.iso.version"
