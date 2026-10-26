@@ -211,11 +211,11 @@ the owner chose to keep those app shortcuts instead.
 
 Pixel Blue runs on the [MrChromebox](https://mrchromebox.org/) UEFI Full ROM. Those releases are **not** published on LVFS, and coreboot has no UEFI capsule support, so stock fwupd cannot flash them. The image therefore ships a small out-of-tree fwupd plugin, `fu-mrchromebox` (`build_files/fwupd-plugin/`, built and installed by `build_files/modules/42-firmware.sh`):
 
-- It registers the Full ROM as a fwupd device (visible in `fwupdmgr get-devices` and GNOME Firmware) and reports the installed BIOS date from `/sys/class/dmi/id/bios_date` as an 8-digit `YYYYMMDD` version.
+- It registers the Full ROM as a fwupd device (visible in `fwupdmgr get-devices` and GNOME Firmware) and reports the installed BIOS date from the SMBIOS tables as an 8-digit `YYYYMMDD` version.
 - It is the only code that touches SPI flash, and it does not reimplement the dangerous steps: it sources the vendored, unmodified upstream `functions.sh`/`sources.sh` in a bash child and calls `clear_software_wp` and `flashrom_write_image` with the environment they expect.
 - It forks `flashrom` (the binary packaged in the image) and does not link `libflashrom`; the only thing downloaded at runtime is the ROM from the MrChromebox CDN.
 
-A weekly timer (`firmware-update-check.timer`) runs `/usr/libexec/firmware-update-check.sh`. It reads the vendored `sources.sh` (it does not fetch scripts from the network), compares the published release date with the installed BIOS date, and when a newer release exists downloads the ROM plus its upstream `.sha1`, verifies SHA-1 and SHA-256, and packs the ROM and a generated `metainfo.xml` into a fwupd cabinet under `/var/lib/fwupd/pixel-blue/cab/`. A `directory` fwupd remote (`/etc/fwupd/remotes.d/pixel-blue.conf`, `file:///var/lib/fwupd/pixel-blue/cab`) exposes that cabinet to fwupd after `fwupdmgr refresh`. Superseded cabinets and dated ROMs (~16 MB each) are removed automatically. The timer only reads and downloads: **it never flashes**.
+A weekly timer (`firmware-update-check.timer`) runs `/usr/libexec/firmware-update-check.sh`. It reads the vendored `sources.sh` (it does not fetch scripts from the network), compares the published release date with the installed BIOS date, and when a newer release exists downloads the ROM plus its upstream `.sha1`, verifies SHA-1 and SHA-256, and packs the ROM and a generated `metainfo.xml` into a fwupd cabinet under `/var/lib/fwupd/pixel-blue/cab/`. A `directory` fwupd remote (`/etc/fwupd/remotes.d/pixel-blue.conf`, `file:///var/lib/fwupd/pixel-blue/cab`) exposes that cabinet to fwupd after `fwupdmgr refresh`. Superseded cabinets and dated ROMs (~16 MB each) are removed automatically. The timer only downloads releases and writes cabinets: **it never flashes**.
 
 Installing is always user initiated:
 
@@ -226,12 +226,12 @@ sudo fwupdmgr update
 
 (or the same actions in GNOME Firmware). fwupd then drives the plugin through `prepare -> write_firmware`: prepare runs preflight and saves the current flash to `backup.rom`; write_firmware clears software write protection, writes the BIOS region via upstream `flashrom_write_image`, and verifies it with `flashrom -v`. Because the device carries `REQUIRE_AC`, fwupd refuses to start on battery, and fwupd's logind plugin holds a `shutdown:sleep` inhibitor for the duration of the flash. On success the device asks for a reboot; only after a reboot does DMI report the new date.
 
-Preflight checks UEFI boot, board `eve`, a non-`Google_*` BIOS version, Secure Boot off, BIOS Lock/SMM write protection off, Intel PR0/GPR0 ranges not covering the BIOS region, hardware write protection off, and that the installed `flashrom` supports `--ifd` and `--use-first-chip`. It fails closed.
+Preflight checks UEFI boot, board `eve`, a non-`Google_*` BIOS version, Secure Boot off, BIOS Lock/SMM write protection off, Intel PR0/GPR0 ranges not covering the BIOS region, hardware write protection off, and that the installed `flashrom` can probe the chip and supports `--ifd` region writes. It fails closed.
 
 Two configuration files are part of the image and are load-bearing:
 
 - `/etc/fwupd/fwupd.conf` sets `OnlyTrusted=false`. The cabinets are generated locally from a ROM already pinned to the upstream `.sha1`; the image has no signing key for them, and an unsigned cabinet would otherwise be refused.
-- `/etc/systemd/system/fwupd.service.d/50-pixel-blue.conf` relaxes the fwupd service sandbox (`SystemCallFilter=`, `SystemCallErrorNumber=`, `ProtectKernelTunables=no`, `ProtectKernelModules=no`): flashrom needs syscalls the upstream filter blocks, and the vendored helpers `rmmod spi_intel_platform`, which needs a writable `/sys` and the kernel-module protections off.
+- `/etc/systemd/system/fwupd.service.d/50-pixel-blue.conf` relaxes the fwupd service sandbox (`SystemCallFilter=`, `SystemCallErrorNumber=`, `ProtectKernelTunables=no`, `ProtectKernelModules=no`, `PrivateTmp=no`, `DeviceAllow=/dev/mem rw`): flashrom needs syscalls the upstream filter blocks and maps the SPI BAR through `/dev/mem` (upstream dropped that device allowance together with its own flashrom plugin), the vendored helpers `rmmod spi_intel_platform`, which needs a writable `/sys` and the kernel-module protections off, and they log to `/tmp/flashrom.log`, which has to survive the service.
 
 Flash state lives in `/var/lib/pixel-blue/firmware/`: `cache/`, `backup.rom`, `backup.json`, `update.rom` and `mrchromebox.log`. Published cabinets live apart, in `/var/lib/fwupd/pixel-blue/cab/`, so `fwupdmgr clean` cannot delete the backup. `backup.rom` is 0600 root; the directories are 0755 so a user session can read the metadata.
 
@@ -242,7 +242,7 @@ The distinction still matters even though fwupd owns the flow:
 - **class A — the flash was never touched.** The failure happened in the weekly check, in preflight, in the backup, or before software write protection was cleared. Rebooting or shutting down is completely safe. Retry `fwupdmgr update`; the cabinet and ROM stay local, so retrying does not need the network.
 - **class B — the write started or was interrupted mid-write.** The flash content may be incomplete and *restarting now can leave the machine unbootable*. Do not reboot; retry `fwupdmgr update` first. fwupd blocks shutdown and sleep while the update is running (its logind plugin holds the inhibitor), but that lock is released when the update returns — after a class B failure nothing blocks the power button any more, so be deliberate until a retry succeeds or the machine is known to boot.
 
-Which case you are in is visible in the `fwupdmgr` output and in `/var/lib/pixel-blue/firmware/mrchromebox.log`: anything logged before `flashrom` starts writing is class A. A failure in the weekly check touches no flash state at all.
+Which case you are in is visible in the `fwupdmgr` output, in `/var/lib/pixel-blue/firmware/mrchromebox.log` and in `/tmp/flashrom.log` (written by the vendored helpers): anything logged before `flashrom` starts writing is class A. A failure in the weekly check touches no flash state at all.
 
 ## "Cancel" does not stop a flash in progress
 
@@ -267,7 +267,7 @@ Everything before this point is deliberately stacked against it: the write is ga
 
 `functions.sh` and `sources.sh` are upstream [Unlicense](https://unlicense.org/) code, installed **verbatim** from a pinned commit. `vendor/mrchromebox/VENDOR_COMMIT` records the 40-character commit and `manifest.sha256` the file hashes; `build_files/modules/42-firmware.sh` copies them to `/usr/lib/pixel-blue/mrchromebox/`. The CI `vendor` job recomputes the manifest, runs `bash -n`, and asserts that the functions and variables the plugin and the weekly check call still exist and that the flashrom flags the parsing depends on are still present. Upgrading is `just vendor-mrchromebox <commit>`, reviewing the diff and committing; nothing is patched locally. `download-fullrom.sh` is installed too, but only as a manual/rescue tool — the automatic path never invokes it, because it fetches upstream metadata at runtime.
 
-`flashrom` is not pinned: it comes from the Fedora base and moves with bootc updates. The plugin probes the installed binary for `--ifd`, `-N/--noverify-all` and `--use-first-chip` instead of assuming a version, and preflight fails closed if the chip cannot be probed.
+`flashrom` is not pinned: it comes from the Fedora base and moves with bootc updates. The plugin probes the installed binary for `--ifd` and `-N/--noverify-all` instead of assuming a version, and preflight fails closed if the chip cannot be probed. Upstream `functions.sh` appends `--use-first-chip`, but that flag only exists in MrChromebox's bundled flashrom and is rejected by the upstream flashrom Fedora ships, so the plugin leaves it out; the Pixelbook has a single SPI chip.
 
 Manual flashing remains possible at any time with the vendored downloader and the upstream tool. The downloader is the unmodified upstream script: outside a git checkout it fetches its own `sources.sh`/`device-db.sh` metadata from GitHub and writes the ROM to the chosen output directory. The automatic weekly path never invokes it.
 

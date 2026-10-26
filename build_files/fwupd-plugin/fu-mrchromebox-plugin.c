@@ -105,13 +105,18 @@ fu_mrchromebox_plugin_coldplug(FuPlugin *plugin, FuProgress *progress, GError **
 					     FU_MRCHROMEBOX_SMBIOS_TYPE_BIOS,
 					     FU_MRCHROMEBOX_SMBIOS_BIOS_DATE);
 	version = fu_mrchromebox_date_to_yyyymmdd(bios_date);
+	/* without a version fwupd cannot order releases; do not offer updates */
+	if (version == NULL) {
+		g_debug("cannot parse the SMBIOS BIOS date '%s', ignoring",
+			bios_date != NULL ? bios_date : "");
+		return TRUE;
+	}
 
 	fu_device_set_id(device, FU_MRCHROMEBOX_DEVICE_ID);
 	fu_device_set_physical_id(device, FU_MRCHROMEBOX_DEVICE_ID);
 	fu_device_set_name(device, "UEFI Full ROM (MrChromebox)");
 	fu_device_set_vendor(device, "MrChromebox");
-	if (version != NULL)
-		fu_device_set_version(device, version);
+	fu_device_set_version(device, version);
 	fu_device_add_instance_id(device, FU_MRCHROMEBOX_INSTANCE_ID);
 	fu_plugin_add_device(plugin, device);
 	return TRUE;

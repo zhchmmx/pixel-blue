@@ -1,1 +1,12 @@
 fwupd 2.1.9
+
+Upstream libfwupdplugin headers, vendored because Fedora's fwupd-devel only
+ships fwupd.h and the libfwupd headers; the plugin in build_files/fwupd-plugin
+compiles against libfwupdplugin. Taken from
+https://github.com/fwupd/fwupd/tree/2.1.9/libfwupdplugin (*.h, including the
+rustgen-generated *-struct.h) plus libfwupd/fwupd-security-attr-private.h.
+
+Refresh by copying those headers from a newer tag and rebuilding the
+*-struct.h files with fwupd's rustgen.py (needs python3-jinja2). The CI
+`plugin` job compiles the plugin against the vendored headers and the fwupd
+that Fedora currently ships, so drift shows up there.

@@ -42,7 +42,6 @@ struct _FuMrchromeboxDevice {
 	gchar *log_path;
 	gchar *sw_wp;
 	gboolean has_ifd;
-	gboolean first_chip;
 	gboolean noverify;
 };
 
@@ -230,8 +229,6 @@ fu_mrchromebox_add_flashrom_base(FuMrchromeboxDevice *self, GPtrArray *argv)
 	g_ptr_array_add(argv, self->flashrom_path);
 	g_ptr_array_add(argv, (gpointer)"-p");
 	g_ptr_array_add(argv, (gpointer)"internal:boardmismatch=force");
-	if (self->first_chip)
-		g_ptr_array_add(argv, (gpointer)"--use-first-chip");
 }
 
 /* Upstream expands $flashromcmd unquoted, so this must stay a single string. */
@@ -240,8 +237,6 @@ fu_mrchromebox_flashrom_string(FuMrchromeboxDevice *self)
 {
 	GString *str = g_string_new(self->flashrom_path);
 	g_string_append(str, " -p internal:boardmismatch=force");
-	if (self->first_chip)
-		g_string_append(str, " --use-first-chip");
 	return g_string_free(str, FALSE);
 }
 
@@ -273,8 +268,14 @@ fu_mrchromebox_device_detect_caps(FuMrchromeboxDevice *self, GError **error)
 	}
 
 	self->has_ifd = strstr(output, "--ifd") != NULL;
-	self->first_chip = strstr(output, "use-first-chip") != NULL;
 	self->noverify = strstr(output, "noverify-all") != NULL;
+
+	/*
+	 * Upstream functions.sh adds --use-first-chip, but that flag only exists in
+	 * MrChromebox's bundled flashrom; upstream flashrom (the one Fedora ships)
+	 * does not implement it and would reject the command line. The Pixelbook
+	 * has a single SPI chip anyway, so the flag buys nothing here.
+	 */
 	return TRUE;
 }
 
@@ -400,11 +401,16 @@ fu_mrchromebox_device_preflight(FuMrchromeboxDevice *self, GError **error)
 				    "reboot into the firmware setup and disable BIOS Lock");
 		return FALSE;
 	}
-	if (strstr(lower, "flash chip") == NULL) {
+	/*
+	 * A probe-only run exits non-zero unless exactly one chip was found: no
+	 * chip, several matching definitions and "too big for this programmer" all
+	 * fail here, which is the gate we want before touching anything.
+	 */
+	if (rc != 0) {
 		g_set_error(error,
 			    FWUPD_ERROR,
 			    FWUPD_ERROR_NOT_SUPPORTED,
-			    "flashrom cannot access the SPI flash: %s",
+			    "flashrom cannot probe the SPI flash: %s",
 			    fu_mrchromebox_output_tail(probe));
 		return FALSE;
 	}
