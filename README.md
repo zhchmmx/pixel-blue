@@ -12,21 +12,11 @@ There are several ways for Pixelbook users to install this image on their device
 
 ## Option 1: Install Pixel Blue from ISO file
 
-The ISO is a live image: it boots a GNOME desktop with an **Install Pixel Blue** launcher, so you can try the system before touching the disk. The installer uses a copy of the image embedded in the ISO (no network needed), copies the preinstalled Flatpak apps into the new system, and points the installed deployment at `ghcr.io/zhchmmx/pixel-blue` so `bootc upgrade` keeps working afterwards. As with the official Silverblue ISO, the installer only asks for the destination disk; the user account and timezone are set up on first boot.
-
-1. Grab the `pixel-blue-iso` artifact from a successful [Build disk images](https://github.com/zhchmmx/pixel-blue/actions/workflows/build-disk.yml) run on `main`. Only non-pull-request runs publish artifacts.
-2. Verify the download before writing it:
-   ``` bash
-   sha256sum -c pixel-blue.iso-CHECKSUM
-   ```
-3. Write `pixel-blue.iso` to a USB stick with Fedora Media Writer, `dd`, or Ventoy, then boot the Pixelbook from it. Pick **Pixel Blue Live**; if the desktop does not come up, use **Pixel Blue Live (Basic Graphics)**, which boots with `nomodeset`.
-4. Open **Install Pixel Blue** from the desktop or the app grid and choose the disk to install to. Reboot when it finishes and remove the USB stick.
-
-The boot menu and the ISO volume label come from `build_files/iso/iso.yaml`; the live/installer environment itself is the second image built by `Containerfile.iso` (it is never pushed to the registry, so the daily image stays lean).
+Visit [Pixel Blue Download Page](https://pixel-blue.pages.dev/) to download the latest `.iso` file.
 
 ### Building the ISO locally
 
-``` bash
+```bash
 just build          # build localhost/pixel-blue:latest
 just build-iso      # wraps it into build/pixel-blue.iso with ublue-os/titanoboa
 just run-vm-iso     # boot the ISO in QEMU
@@ -42,7 +32,7 @@ Pixel Blue is published in three channels. Pick the one you want and use the mat
 
 `latest` follows the upstream Universal Blue `latest` image and always tracks the newest Fedora.
 
-``` bash
+```bash
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest
 ```
 
@@ -50,16 +40,15 @@ sudo bootc switch ghcr.io/zhchmmx/pixel-blue:latest
 
 `testing` is the preview channel for `latest`. It is built from the same upstream `latest` base, so it only differs by the changes that are being validated before they land in `latest`. Use it if you want to test upcoming changes early.
 
-``` bash
+```bash
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:testing
 ```
-
 
 ### Pinning to a specific build
 
 Every build is also published with a version tag, so you can freeze to an exact build:
 
-``` bash
+```bash
 sudo bootc switch ghcr.io/zhchmmx/pixel-blue:20261024.42
 ```
 
@@ -86,43 +75,42 @@ Keep Modern Standby instead if you value instant resume and background
 network/notifications over low standby drain — that is a valid trade-off, just
 expect higher lid-close power draw.
 
-
 # Keyboard Layout (ChromeOS-style)
 
 The Pixelbook keyboard is remapped via [keyd](https://github.com/rvaiya/keyd). The mappings are:
 
 ## Top row (bare press)
 
-| Physical key | ChromeOS role | Emits on Pixel Blue |
-| --- | --- | --- |
-| `Esc` | Cancel | `Esc` (native) |
-| `Back` | Back | `Back` (native media key) |
-| `Refresh` | Forward | `Refresh` (native media key) |
-| `Fullscreen` (`zoom`) | Fullscreen | `F11` (bare `KEY_ZOOM` does nothing in GNOME) |
-| `Overview` (`scale`) | Show windows / Desks | `Print` → **screenshot UI** (owner choice; see caveats) |
-| `Brightness −` / `+` | Brightness | native pass-through |
-| `Play/Pause`, `Mute`, `Vol −` / `+` | Media | native pass-through |
-| `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native) |
+| Physical key                                            | ChromeOS role                | Emits on Pixel Blue                                     |
+| ------------------------------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `Esc`                                                   | Cancel                       | `Esc` (native)                                          |
+| `Back`                                                  | Back                         | `Back` (native media key)                               |
+| `Refresh`                                               | Forward                      | `Refresh` (native media key)                            |
+| `Fullscreen` (`zoom`)                                   | Fullscreen                   | `F11` (bare `KEY_ZOOM` does nothing in GNOME)           |
+| `Overview` (`scale`)                                    | Show windows / Desks         | `Print` → **screenshot UI** (owner choice; see caveats) |
+| `Brightness −` / `+`                                    | Brightness                   | native pass-through                                     |
+| `Play/Pause`, `Mute`, `Vol −` / `+`                     | Media                        | native pass-through                                     |
+| `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native)       |
 
 ## Search (Meta) held
 
-| Combo | Emits | Function |
-| --- | --- | --- |
-| `Search` + `Back`…`Vol +` | `F1`–`F10` | the official top-row F-keys |
-| `Search` + `Three-lines` | `F12` | F12 (ChromeOS has no F12 key) |
-| `Search` + `←` / `→` | bare `Home` / `End` | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
-| `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End` | select to line start / end |
-| `Search` + `Ctrl` + `←` / `→` | `Ctrl+Home` / `Ctrl+End` | start / end of document |
-| `Search` + `[` / `]` | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace |
-| `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down` | move window to previous / next workspace |
-| `Search` + `Alt` | `Caps Lock` | Caps Lock (either order) |
+| Combo                          | Emits                               | Function                                                                                        |
+| ------------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `Search` + `Back`…`Vol +`      | `F1`–`F10`                          | the official top-row F-keys                                                                     |
+| `Search` + `Three-lines`       | `F12`                               | F12 (ChromeOS has no F12 key)                                                                   |
+| `Search` + `←` / `→`           | bare `Home` / `End`                 | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
+| `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End`          | select to line start / end                                                                      |
+| `Search` + `Ctrl` + `←` / `→`  | `Ctrl+Home` / `Ctrl+End`            | start / end of document                                                                         |
+| `Search` + `[` / `]`           | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace                                                                       |
+| `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down`    | move window to previous / next workspace                                                        |
+| `Search` + `Alt`               | `Caps Lock`                         | Caps Lock (either order)                                                                        |
 
 ## Alt held
 
-| Combo | Emits | Function |
-| --- | --- | --- |
-| `Alt` + `Backspace` | `Delete` | forward delete |
-| `Alt` + `Search` | `Caps Lock` | Caps Lock |
+| Combo                        | Emits              | Function            |
+| ---------------------------- | ------------------ | ------------------- |
+| `Alt` + `Backspace`          | `Delete`           | forward delete      |
+| `Alt` + `Search`             | `Caps Lock`        | Caps Lock           |
 | `Alt` + `Brightness −` / `+` | keyboard backlight | native pass-through |
 
 # Modifications to the Upstream
