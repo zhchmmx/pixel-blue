@@ -229,6 +229,14 @@ jobs:
             echo "ok: $f"
           done
 
+      # The flashrom build the image installs instead of the Fedora package.
+      - name: Vendored flashrom
+        run: |
+          set -euo pipefail
+          ( cd vendor/flashrom && sha256sum -c SHA256 )
+          tar -tzf vendor/flashrom/flashrom.tar.gz | grep -qx flashrom
+          echo "ok: vendor/flashrom"
+
       # The daemon and the weekly check call these upstream functions by name.
       # A function rename or a dropped flashrom flag must fail here, not on a
       # Pixelbook mid-update.
@@ -283,7 +291,7 @@ jobs:
         run: |
           set -ouex pipefail
           dnf5 install -y --setopt=install_weak_deps=False \
-            gcc glib2-devel libxmlb-devel fwupd fwupd-devel
+            gcc glib2-devel libxmlb-devel fwupd fwupd-devel pciutils-libs
 
           fwupd_plugindir=""
           for candidate in /usr/lib64/fwupd-*; do
@@ -317,6 +325,13 @@ jobs:
           nm -D --defined-only /tmp/libfu_plugin_mrchromebox.so | grep -qw fu_plugin_init_vfuncs \
             || { echo "::error::plugin does not export fu_plugin_init_vfuncs"; exit 1; }
           echo "plugin compiled and exports fu_plugin_init_vfuncs"
+
+          # The same binary the image installs: if it cannot load here it cannot
+          # load on the image either, so catch that before the plugin runs it.
+          mkdir -p /tmp/flashrom-check
+          tar -xzf vendor/flashrom/flashrom.tar.gz -C /tmp/flashrom-check
+          /tmp/flashrom-check/flashrom -h >/dev/null
+          echo "vendored flashrom runs"
 
   # ---------------------------------------------------------------------------
   # Data files: TOML / JSON / XML / keyfile / systemd units / flatpak refs

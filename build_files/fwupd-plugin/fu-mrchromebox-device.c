@@ -3,9 +3,10 @@
  *
  * The image never ships a general purpose firmware updater: the only thing
  * this device knows how to do is drive the vendored MrChromebox helpers, which
- * are the same code path the upstream firmware-util.sh TUI uses. Nothing here
- * downloads a programmer binary and nothing links libflashrom, so the plugin
- * keeps working when the vendored helpers change.
+ * are the same code path the upstream firmware-util.sh TUI uses, with the same
+ * flashrom binary it downloads. Nothing is fetched at run time and nothing
+ * links libflashrom, so the plugin keeps working when the vendored helpers
+ * change.
  *
  * SPDX-License-Identifier: LGPL-2.1-or-later
  */
@@ -23,6 +24,8 @@
 
 #define FU_MRCHROMEBOX_VENDOR_DIR "/usr/lib/pixel-blue/mrchromebox"
 #define FU_MRCHROMEBOX_STATE_DIR  "/var/lib/pixel-blue/firmware"
+/* the build MrChromebox publishes for firmware-util.sh, vendored in the image */
+#define FU_MRCHROMEBOX_FLASHROM   FU_MRCHROMEBOX_VENDOR_DIR "/flashrom"
 
 /* flashrom can hang on a wedged SPI controller, so every call is bounded */
 #define FU_MRCHROMEBOX_TIMEOUT_PROBE  60
@@ -42,6 +45,7 @@ struct _FuMrchromeboxDevice {
 	gchar *log_path;
 	gchar *sw_wp;
 	gboolean has_ifd;
+	gboolean first_chip;
 	gboolean noverify;
 };
 
@@ -229,6 +233,9 @@ fu_mrchromebox_add_flashrom_base(FuMrchromeboxDevice *self, GPtrArray *argv)
 	g_ptr_array_add(argv, self->flashrom_path);
 	g_ptr_array_add(argv, (gpointer)"-p");
 	g_ptr_array_add(argv, (gpointer)"internal:boardmismatch=force");
+	/* upstream appends this whenever isChromeOS=false, which is this device */
+	if (self->first_chip)
+		g_ptr_array_add(argv, (gpointer)"--use-first-chip");
 }
 
 /* Upstream expands $flashromcmd unquoted, so this must stay a single string. */
@@ -237,6 +244,8 @@ fu_mrchromebox_flashrom_string(FuMrchromeboxDevice *self)
 {
 	GString *str = g_string_new(self->flashrom_path);
 	g_string_append(str, " -p internal:boardmismatch=force");
+	if (self->first_chip)
+		g_string_append(str, " --use-first-chip");
 	return g_string_free(str, FALSE);
 }
 
@@ -247,10 +256,15 @@ fu_mrchromebox_device_detect_caps(FuMrchromeboxDevice *self, GError **error)
 	g_autofree gchar *output = NULL;
 	gint rc;
 
-	if (self->flashrom_path == NULL) {
-		g_autofree gchar *path = g_find_program_in_path("flashrom");
-		self->flashrom_path = path != NULL ? g_steal_pointer(&path)
-						   : g_strdup("/usr/sbin/flashrom");
+	if (self->flashrom_path == NULL)
+		self->flashrom_path = g_strdup(FU_MRCHROMEBOX_FLASHROM);
+	if (!g_file_test(self->flashrom_path, G_FILE_TEST_IS_EXECUTABLE)) {
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_NOT_SUPPORTED,
+			    "the vendored flashrom %s is missing",
+			    self->flashrom_path);
+		return FALSE;
 	}
 
 	fu_mrchromebox_add_flashrom_base(self, argv);
@@ -267,15 +281,13 @@ fu_mrchromebox_device_detect_caps(FuMrchromeboxDevice *self, GError **error)
 		return FALSE;
 	}
 
-	self->has_ifd = strstr(output, "--ifd") != NULL;
-	self->noverify = strstr(output, "noverify-all") != NULL;
-
 	/*
-	 * Upstream functions.sh adds --use-first-chip, but that flag only exists in
-	 * MrChromebox's bundled flashrom; upstream flashrom (the one Fedora ships)
-	 * does not implement it and would reject the command line. The Pixelbook
-	 * has a single SPI chip anyway, so the flag buys nothing here.
+	 * Probe rather than assume: the image pins the binary, but a future
+	 * vendor bump must not silently change the flags the helpers rely on.
 	 */
+	self->has_ifd = strstr(output, "--ifd") != NULL;
+	self->first_chip = strstr(output, "use-first-chip") != NULL;
+	self->noverify = strstr(output, "noverify-all") != NULL;
 	return TRUE;
 }
 

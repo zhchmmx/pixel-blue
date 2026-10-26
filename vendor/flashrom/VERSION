@@ -1,0 +1,17 @@
+flashrom_ups_int_20260927
+
+The flashrom build MrChromebox publishes for firmware-util.sh, not the Fedora
+package. It is what the vendored helpers were tested against and it carries
+their --use-first-chip patch. Taken verbatim from
+https://www.mrchromebox.tech/files/util/flashrom_ups_int_20260927.tar.gz
+(the tarball holds a single `flashrom` binary; SHA256 records its checksum).
+
+The image extracts it to /usr/lib/pixel-blue/mrchromebox/flashrom, so the flash
+path never downloads or unpacks an executable at run time. Its only shared
+library dependency is libpci.so.3 (pciutils-libs); 42-firmware.sh runs the
+binary's -h after extraction and fails the build if it cannot load, and the CI
+`plugin` job does the same inside Fedora.
+
+Refresh by downloading the new dated tarball from the same directory, replacing
+flashrom.tar.gz, regenerating SHA256 and updating this file; then verify that
+42-firmware.sh's -h smoke test still passes.
