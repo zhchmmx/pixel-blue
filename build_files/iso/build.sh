@@ -244,7 +244,7 @@ cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 # Pixel Blue live install (titanoboa, issue #77).
 %include /usr/share/anaconda/post-scripts/install-flatpaks.ks
 %include /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
-%include /usr/share/anaconda/post-scripts/install-selinux-labels.ks
+%include /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
 EOF
 
