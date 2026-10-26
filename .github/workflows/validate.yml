@@ -119,7 +119,7 @@ jobs:
           }
 
   # ---------------------------------------------------------------------------
-  # Python: 1 daemon, discovered by shebang (#! ... python)
+  # Python: the ALS auto-brightness daemon, discovered by shebang
   # ---------------------------------------------------------------------------
   python:
     name: Python
@@ -242,7 +242,7 @@ jobs:
           device=eve
           firmwareType="Full ROM / UEFI"
           fwDate="06/27/2023"
-          for fn in clear_software_wp intel_pr_gpr_locked efi_secure_boot_enabled \
+          for fn in clear_software_wp intel_pr_gpr_locked \
                     flashrom_write_image fullrom_installed_yyyymmdd \
                     fullrom_date_newer_than_installed fullrom_slot_info \
                     fullrom_resolve_slot fullrom_slot_label fullrom_cdn_base_for_slot \
@@ -263,6 +263,60 @@ jobs:
           grep -q -- '--wp-range' vendor/mrchromebox/functions.sh
           grep -q 'FREG1: BIOS region' vendor/mrchromebox/functions.sh
           echo "vendor interface smoke passed"
+
+  # ---------------------------------------------------------------------------
+  # fwupd plugin: compiled the same way 42-firmware.sh compiles it, inside
+  # Fedora so fwupd-devel and the plugin directory match the image. The
+  # libfwupdplugin headers are vendored (vendor/fwupd) because fwupd-devel
+  # does not ship them.
+  # ---------------------------------------------------------------------------
+  plugin:
+    name: fwupd plugin
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Compile and check exports
+        run: |
+          set -ouex pipefail
+          dnf5 install -y --setopt=install_weak_deps=False \
+            gcc glib2-devel libxmlb-devel fwupd fwupd-devel
+
+          fwupd_plugindir=""
+          for candidate in /usr/lib64/fwupd-*; do
+            if [ -f "${candidate}/libfwupdplugin.so" ]; then
+              fwupd_plugindir="${candidate}"
+              break
+            fi
+          done
+          [ -n "${fwupd_plugindir}" ] || { echo "::error::no fwupd plugin directory found"; exit 1; }
+
+          read -r -a fwupd_cflags <<<"$(pkg-config --cflags glib-2.0 gobject-2.0 gio-2.0 xmlb)"
+          read -r -a fwupd_libs <<<"$(pkg-config --libs glib-2.0 gobject-2.0 gio-2.0 xmlb)"
+          read -r -a fwupd_link <<<"$(pkg-config --libs fwupd)"
+
+          # Keep in sync with build_files/modules/42-firmware.sh.
+          gcc -O2 -fPIC -std=c11 -Wall -Wextra -Wno-unused-parameter -Wl,--no-undefined \
+            -Ivendor/fwupd/include \
+            -Ivendor/fwupd/include/libfwupd \
+            -Ivendor/fwupd/include/libfwupdplugin \
+            -I/usr/include/fwupd-3 -I/usr/include/fwupd-3/libfwupd \
+            "${fwupd_cflags[@]}" \
+            -shared -o /tmp/libfu_plugin_mrchromebox.so \
+            build_files/fwupd-plugin/fu-mrchromebox-plugin.c \
+            build_files/fwupd-plugin/fu-mrchromebox-device.c \
+            -L"${fwupd_plugindir}" -lfwupdplugin \
+            "${fwupd_link[@]}" \
+            -Wl,-rpath,"${fwupd_plugindir}" \
+            "${fwupd_libs[@]}"
+
+          # fwupd loads plugins by this symbol; a missing one is a silent no-op.
+          nm -D --defined-only /tmp/libfu_plugin_mrchromebox.so | grep -qw fu_plugin_init_vfuncs \
+            || { echo "::error::plugin does not export fu_plugin_init_vfuncs"; exit 1; }
+          echo "plugin compiled and exports fu_plugin_init_vfuncs"
 
   # ---------------------------------------------------------------------------
   # Data files: TOML / JSON / XML / keyfile / systemd units / flatpak refs
@@ -492,6 +546,7 @@ jobs:
       - shell
       - python
       - vendor
+      - plugin
       - data
     steps:
       - name: Aggregate result

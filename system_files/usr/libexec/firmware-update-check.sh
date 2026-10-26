@@ -4,17 +4,18 @@
 # Pixelbook (eve).
 #
 # Runs as a root systemd oneshot (firmware-update-check.timer).  It never
-# writes SPI flash: it only resolves the latest upstream release, downloads
-# and verifies the ROM image into cache/ and publishes check.json for the
-# daemon/GUI.  Flashing is exclusively user initiated through StartUpdate on
-# tech.pixelblue.Firmware1.
+# writes SPI flash: it resolves the latest upstream release, downloads and
+# verifies the ROM image, wraps it into a fwupd cabinet under cab/ and lets
+# fwupd re-read that directory remote.  Installing is exclusively user
+# initiated through fwupd (`fwupdmgr update`), which drives the mrchromebox
+# plugin; that plugin owns preflight, backup, write protection and flashing.
 #
 # Release metadata and the installed-date helpers come from the vendored
 # upstream scripts (vendor/mrchromebox, pinned commit, CI-checked interface);
 # nothing is fetched from the network except the ROM image itself.
 #
-# Failures are deliberately non-fatal: keep the previous check.json and let
-# the next run retry.
+# Failures are deliberately non-fatal: keep the previous cabinet and let the
+# next run retry.
 #
 # The vendored scripts are sourced at a runtime path and define the helpers
 # and variables used below; shellcheck cannot see through that.
@@ -23,6 +24,11 @@ set -euo pipefail
 
 # Testability overrides; unused in the shipped image.
 : "${MRCHROMEBOX_STATE_DIR:=/var/lib/pixel-blue/firmware}"
+# The published cabinets live under fwupd's own state directory: it is labeled
+# fwupd_var_lib_t, and `fwupdmgr clean` deletes every file under the parent of
+# a directory remote. Keeping them apart means a clean can never take
+# backup.rom with it.
+: "${MRCHROMEBOX_FWUPD_DIR:=/var/lib/fwupd/pixel-blue}"
 : "${MRCHROMEBOX_DMI_DIR:=/sys/class/dmi/id}"
 : "${MRCHROMEBOX_EFI_DIR:=/sys/firmware/efi}"
 : "${MRCHROMEBOX_VENDOR_DIR:=/usr/lib/pixel-blue/mrchromebox}"
@@ -31,9 +37,15 @@ set -euo pipefail
 : "${MRCHROMEBOX_SKIP_LOOKUP:=0}"
 : "${MRCHROMEBOX_NOTES_URL:=https://docs.mrchromebox.tech/docs/firmware/full-rom.html}"
 
+CAB_DIR="${MRCHROMEBOX_FWUPD_DIR}/cab"
 CACHE_DIR="${MRCHROMEBOX_STATE_DIR}/cache"
-CHECK_JSON="${MRCHROMEBOX_STATE_DIR}/check.json"
-MARKER="${MRCHROMEBOX_STATE_DIR}/flash-failed"
+
+# Must match FU_MRCHROMEBOX_INSTANCE_ID in build_files/fwupd-plugin; fwupd
+# matches a release to a device through this GUID.  It is
+# fwupd_guid_hash_string("mrchromebox:board:eve").
+COMPONENT_ID="tech.pixelblue.mrchromebox.eve"
+COMPONENT_GUID="6942c9af-0f36-5798-8a97-11decdc7c16a"
+METAINFO_NAME="${COMPONENT_ID}.metainfo.xml"
 
 BIOS_VERSION=""
 INSTALLED_YMD=""
@@ -56,12 +68,8 @@ date_to_number() {
   printf '%s' "$((10#$y * 10000 + 10#$m * 100 + 10#$d))"
 }
 
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
-
 # Download "$url" (ROM) and "$url.sha1", verify the SHA-1 and move the ROM
-# into cache/.  Prints "sha1 sha256 size" on success.
+# into cache/.  Prints "sha256 size" on success.
 download_and_verify() {
   local url="$1"
   local file="$2"
@@ -91,14 +99,13 @@ download_and_verify() {
   fi
   mv -f "$rom_tmp" "${CACHE_DIR}/${file}"
   rm -f "$sha_tmp"
-  printf '%s %s %s\n' \
-    "$actual" \
+  printf '%s %s\n' \
     "$(sha256sum "${CACHE_DIR}/${file}" | awk '{print $1}')" \
     "$(stat -c %s "${CACHE_DIR}/${file}")"
 }
 
 # Each dated release leaves a ~16 MB ROM behind; keep only the image the
-# published check.json currently points at ("" = none).
+# published cabinet currently points at ("" = none).
 cleanup_stale_roms() {
   local keep="${1:-}"
   local f
@@ -113,77 +120,93 @@ cleanup_stale_roms() {
   done
 }
 
-# Only a completed class-A failure may be cleared here.  Class B means the
-# SPI write was interrupted: rebooting is forbidden until a successful retry,
-# so the marker and the alert must survive an "up to date" check.
-clear_class_a_marker() {
-  local klass state
-  [[ -f "$MARKER" ]] || return 0
-  klass=$(sed -n 's/^class=//p' "$MARKER" | head -n 1)
-  state=$(sed -n 's/^state=//p' "$MARKER" | head -n 1)
-  if [[ "$state" = "failed" && "$klass" = "A" ]]; then
-    rm -f "$MARKER"
-    log "cleared stale class-A failure marker"
+# Keep at most one cabinet ("" = none), so fwupd does not advertise a release
+# that upstream has since withdrawn.
+cleanup_stale_cabs() {
+  local keep="${1:-}"
+  local f
+
+  for f in "${CAB_DIR}"/*.cab; do
+    [[ -e "$f" ]] || continue
+    if [[ -n "$keep" && "$f" == "${CAB_DIR}/${keep}" ]]; then
+      continue
+    fi
+    rm -f "$f"
+    log "removed superseded cabinet $(basename "$f")"
+  done
+}
+
+# Wrap the verified ROM in a cabinet fwupd understands.  The appliance never
+# signs its metadata (fwupd.conf sets OnlyTrusted=false): the payload is
+# already pinned to the upstream .sha1 and the cabinet is generated locally
+# from that exact file.
+build_cabinet() {
+  local version="$1" date_ymd="$2" rom_name="$3" sha256="$4" size="$5"
+  local release_date tmpdir label
+
+  release_date="${date_ymd:0:4}-${date_ymd:4:2}-${date_ymd:6:2}"
+  label="$6"
+
+  tmpdir=$(mktemp -d "${CAB_DIR}/.build.XXXXXX") || return 1
+
+  cp "${CACHE_DIR}/${rom_name}" "${tmpdir}/${rom_name}" || {
+    rm -rf "$tmpdir"
+    return 1
+  }
+
+  cat >"${tmpdir}/${METAINFO_NAME}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="firmware">
+  <id>${COMPONENT_ID}</id>
+  <name>MrChromebox UEFI Full ROM</name>
+  <summary>Coreboot UEFI Full ROM for the Google Pixelbook (eve)</summary>
+  <description>
+    <p>MrChromebox Full ROM release ${label} (${release_date}) for the
+    Google Pixelbook. Upstream notes:
+    ${MRCHROMEBOX_NOTES_URL}</p>
+  </description>
+  <provides>
+    <firmware type="flashed">${COMPONENT_GUID}</firmware>
+  </provides>
+  <releases>
+    <release version="${version}" date="${release_date}" urgency="high">
+      <checksum type="sha256" target="content" filename="${rom_name}">${sha256}</checksum>
+      <size type="installed">${size}</size>
+    </release>
+  </releases>
+  <custom>
+    <value key="LVFS::VersionFormat">plain</value>
+  </custom>
+</component>
+EOF
+
+  # gcab keeps the payload deflated; fwupd reads it with libgcab.
+  if ! (cd "$tmpdir" && gcab -z -c firmware.cab "$rom_name" "$METAINFO_NAME"); then
+    log "cannot build the firmware cabinet"
+    rm -rf "$tmpdir"
+    return 1
   fi
+  chmod 644 "${tmpdir}/firmware.cab"
+  mv -f "${tmpdir}/firmware.cab" "${CAB_DIR}/${version}.cab" || {
+    rm -rf "$tmpdir"
+    return 1
+  }
+  rm -rf "$tmpdir"
 }
 
-publish_no_update() {
-  local tmp checked_at
-  checked_at=$(date +%s)
-  tmp=$(mktemp -p "$MRCHROMEBOX_STATE_DIR" check.json.XXXXXX)
-  cat >"$tmp" <<EOF
-{
-  "schema": 1,
-  "installed_version": "$(json_escape "$BIOS_VERSION")",
-  "installed_date": "${INSTALLED_YMD}",
-  "available_version": null,
-  "available_date": null,
-  "release_date": null,
-  "notes_url": "${MRCHROMEBOX_NOTES_URL}",
-  "downloaded": false,
-  "rom_file": null,
-  "sha1": null,
-  "sha256": null,
-  "size": 0,
-  "checked_at": ${checked_at}
-}
-EOF
-  chmod 644 "$tmp"
-  mv -f "$tmp" "$CHECK_JSON"
-}
-
-publish_update() {
-  local available_version="$1" available_date="$2" rom_file="$3"
-  local sha1="$4" sha256="$5" size="$6"
-  local release_date tmp checked_at
-
-  release_date="${available_date:0:4}-${available_date:4:2}-${available_date:6:2}"
-  checked_at=$(date +%s)
-  tmp=$(mktemp -p "$MRCHROMEBOX_STATE_DIR" check.json.XXXXXX)
-  cat >"$tmp" <<EOF
-{
-  "schema": 1,
-  "installed_version": "$(json_escape "$BIOS_VERSION")",
-  "installed_date": "${INSTALLED_YMD}",
-  "available_version": "$(json_escape "$available_version")",
-  "available_date": "${available_date}",
-  "release_date": "${release_date}",
-  "notes_url": "${MRCHROMEBOX_NOTES_URL}",
-  "downloaded": true,
-  "rom_file": "$(json_escape "$rom_file")",
-  "sha1": "${sha1}",
-  "sha256": "${sha256}",
-  "size": ${size},
-  "checked_at": ${checked_at}
-}
-EOF
-  chmod 644 "$tmp"
-  mv -f "$tmp" "$CHECK_JSON"
+# fwupd caches the directory remote after each refresh; ask the daemon to
+# rebuild it now so the update shows up without waiting for the next start.
+refresh_metadata() {
+  if ! fwupdmgr refresh --force >/dev/null 2>&1; then
+    log "fwupdmgr refresh failed; the daemon will pick the cabinet up later"
+    return 1
+  fi
+  return 0
 }
 
 main() {
-  local bios_date installed available_version rom_file rom_url base
-  local latest_ymd
+  local bios_date rom_file rom_url base
+  local latest_ymd label cab_name available_version
 
   # Gate 1: UEFI boot only.
   if [[ ! -d "${MRCHROMEBOX_EFI_DIR}" ]]; then
@@ -202,11 +225,11 @@ main() {
     return 0
   fi
 
-  mkdir -p "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR" "${MRCHROMEBOX_STATE_DIR}/export"
-  chmod 755 "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR"
+  mkdir -p "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR" "$MRCHROMEBOX_FWUPD_DIR" "$CAB_DIR"
+  chmod 755 "${MRCHROMEBOX_STATE_DIR}" "$CACHE_DIR" "$MRCHROMEBOX_FWUPD_DIR" "$CAB_DIR"
 
-  # A manual CheckNow from the GUI can race the timer; serialize the whole
-  # lookup/download/publish sequence.
+  # A manual refresh from a fwupd frontend can race the timer; serialize the
+  # whole lookup/download/publish sequence.
   if command -v flock >/dev/null 2>&1; then
     exec 9>"${MRCHROMEBOX_STATE_DIR}/check.lock"
     if ! flock -w 600 9; then
@@ -218,7 +241,7 @@ main() {
   fi
   # Safe only after taking the lock: another run's in-flight temp file must
   # not be deleted from under it.
-  rm -f "${MRCHROMEBOX_STATE_DIR}"/check.json.*
+  rm -rf "${CAB_DIR}"/.build.* "${CAB_DIR}"/.cab.*
 
   if [[ ! -r "$SOURCES_SH" || ! -r "$FUNCTIONS_SH" ]]; then
     log "vendored MrChromebox scripts missing under ${MRCHROMEBOX_VENDOR_DIR}"
@@ -260,19 +283,27 @@ main() {
     log "cannot build the ROM file name for ${latest_ymd}"
     return 0
   fi
-  if [[ "$_fullrom_slot_is_hotfix" = true ]]; then
-    available_version="hotfix-${latest_ymd}"
-  else
-    available_version="$(fullrom_slot_label latest)"
+  label=$(fullrom_slot_label latest) || label=""
+  # The plugin exposes the DMI date as an 8-digit plain version; keep the
+  # release version in the same shape so fwupd can order the two.
+  available_version="$latest_ymd"
+  cab_name="${available_version}.cab"
+
+  # Nothing newer than what is already installed: drop any advertised release
+  # and free the ROM cache.
+  if ! fullrom_date_newer_than_installed "$latest_ymd"; then
+    cleanup_stale_cabs ""
+    cleanup_stale_roms ""
+    refresh_metadata || true
+    log "firmware up to date (installed ${INSTALLED_YMD}, latest ${latest_ymd})"
+    return 0
   fi
 
-  # Nothing newer than what is already installed: publish zero-release
-  # metadata, drop a stale class-A failure marker and free the ROM cache.
-  if ! fullrom_date_newer_than_installed "$latest_ymd"; then
-    publish_no_update
-    cleanup_stale_roms ""
-    clear_class_a_marker
-    log "firmware up to date (installed ${INSTALLED_YMD}, latest ${latest_ymd})"
+  # Already published for this release: nothing to download again.
+  if [[ -s "${CAB_DIR}/${cab_name}" && "$MRCHROMEBOX_SKIP_DOWNLOAD" != 1 ]]; then
+    cleanup_stale_cabs "$cab_name"
+    refresh_metadata || true
+    log "cabinet for ${available_version} already published"
     return 0
   fi
 
@@ -294,25 +325,30 @@ main() {
   fi
 
   local cached="${CACHE_DIR}/${rom_file}"
-  local checksum_line sha1 sha256 size
+  local checksum_line sha256 size
   if [[ "$MRCHROMEBOX_SKIP_DOWNLOAD" = 1 || "$MRCHROMEBOX_SKIP_LOOKUP" = 1 ]]; then
     if [[ ! -f "$cached" ]]; then
       log "staged mode but ${rom_file} is not in ${CACHE_DIR}; keeping previous metadata"
       return 0
     fi
-    sha1=$(sha1sum "$cached" | awk '{print $1}')
     sha256=$(sha256sum "$cached" | awk '{print $1}')
     size=$(stat -c %s "$cached")
   else
     if ! checksum_line=$(download_and_verify "$rom_url" "$rom_file"); then
       return 0
     fi
-    read -r sha1 sha256 size <<<"$checksum_line"
+    read -r sha256 size <<<"$checksum_line"
   fi
 
-  publish_update "$available_version" "$latest_ymd" "$rom_file" "$sha1" "$sha256" "$size"
+  if ! build_cabinet "$available_version" "$latest_ymd" "$rom_file" "$sha256" "$size" "$label"; then
+    log "keeping previous metadata"
+    return 0
+  fi
+
+  cleanup_stale_cabs "$cab_name"
   cleanup_stale_roms "$rom_file"
-  log "published update ${available_version} (${latest_ymd}); installed ${INSTALLED_YMD}"
+  refresh_metadata || true
+  log "published ${cab_name} (${label:-${latest_ymd}}); installed ${INSTALLED_YMD}"
 }
 
 main "$@"

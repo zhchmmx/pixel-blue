@@ -1,0 +1,164 @@
+/*
+ * Copyright 2017 Richard Hughes <richard@hughsie.com>
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+
+#pragma once
+
+#include <fwupd.h>
+#include <xmlb.h>
+
+#include "fu-common-struct.h"
+#include "fu-path-store.h"
+
+/**
+ * FU_BIT_SET:
+ * @val: integer value
+ * @pos: bit position, where 0 is the least significant byte
+ *
+ * Sets a bit in a value using a bitwise operation.
+ *
+ * Since: 2.0.0
+ **/
+#define FU_BIT_SET(val, pos) ((val) |= (1ull << (pos))) /* nocheck:blocked */
+
+/**
+ * FU_BIT_CLEAR:
+ * @val: integer value
+ * @pos: bit position, where 0 is the least significant byte
+ *
+ * Clears a bit in a value using a bitwise operation.
+ *
+ * Since: 2.0.0
+ **/
+#define FU_BIT_CLEAR(val, pos) ((val) &= ~(1ull << (pos))) /* nocheck:blocked */
+
+/**
+ * FU_BIT_IS_SET:
+ * @val: integer value
+ * @pos: bit position, where 0 is the least significant byte
+ *
+ * Checks a bit in a value using a bitwise operation.
+ *
+ * Returns: %TRUE if the bit is set.
+ *
+ * Since: 2.0.0
+ **/
+#define FU_BIT_IS_SET(val, pos) ((val) & (1ull << (pos)))
+
+/**
+ * FU_BIT_IS_CLEAR:
+ * @val: integer value
+ * @pos: bit position, where 0 is the least significant byte
+ *
+ * Checks a bit in a value using a bitwise operation.
+ *
+ * Returns: %TRUE if the bit is clear.
+ *
+ * Since: 2.0.0
+ **/
+#define FU_BIT_IS_CLEAR(val, pos) (!FU_BIT_IS_SET(val, (pos)))
+
+/**
+ * FU_KB:
+ *
+ * The number of bytes in 1 KiB.
+ *
+ * Since: 2.1.2
+ **/
+#define FU_KB (1ull << 10)
+
+/**
+ * FU_MB:
+ *
+ * The number of bytes in 1 MiB.
+ *
+ * Since: 2.1.2
+ **/
+#define FU_MB (1ull << 20)
+
+/**
+ * FU_GB:
+ *
+ * The number of bytes in 1 GiB.
+ *
+ * Since: 2.1.2
+ **/
+#define FU_GB (1ull << 30)
+
+gboolean
+fu_cpuid(guint32 leaf, guint32 *eax, guint32 *ebx, guint32 *ecx, guint32 *edx, GError **error)
+    G_GNUC_WARN_UNUSED_RESULT;
+GHashTable *
+fu_cpu_get_attrs(FuPathStore *pstore, GError **error);
+
+guint64
+fu_common_get_memory_size(void);
+gchar *
+fu_common_get_kernel_cmdline(GError **error);
+gchar *
+fu_common_get_olson_timezone_id(FuPathStore *pstore, GError **error);
+
+guint16
+fu_common_to_bcd_u16(guint16 value);
+guint8
+fu_common_to_bcd_u8(guint8 value);
+guint16
+fu_common_from_bcd_u16(guint16 value);
+guint8
+fu_common_from_bcd_u8(guint8 value);
+
+gsize
+fu_common_align_up(gsize value, guint8 alignment);
+gboolean
+fu_power_state_is_ac(FuPowerState power_state);
+gsize
+fu_size_checked_add(gsize a, gsize b);
+gboolean
+fu_size_checked_inc(gsize *value, gsize len, GError **error) G_GNUC_WARN_UNUSED_RESULT
+    G_GNUC_NON_NULL(1);
+gboolean
+fu_size_checked_inc_product(gsize *value, gsize a, gsize b, GError **error)
+    G_GNUC_WARN_UNUSED_RESULT G_GNUC_NON_NULL(1);
+gboolean
+fu_size_from_uint64(guint64 value, gsize *out, GError **error) G_GNUC_WARN_UNUSED_RESULT
+    G_GNUC_NON_NULL(2);
+
+gchar *
+fu_base64_encode(const guint8 *buf, gsize bufsz) G_GNUC_WARN_UNUSED_RESULT;
+
+typedef struct {
+	guint value;
+	FwupdError code;
+	const gchar *message;
+} FuErrorMapEntry;
+
+gboolean
+fu_error_map_entry_to_gerror(guint value,
+			     const FuErrorMapEntry entries[],
+			     guint n_entries,
+			     GError **error) G_GNUC_NON_NULL(2);
+
+typedef struct {
+	GQuark domain;
+	gint code;
+	FwupdError error;
+} FuErrorConvertEntry;
+
+gboolean
+fu_error_convert(const FuErrorConvertEntry entries[], guint n_entries, GError **perror)
+    G_GNUC_NON_NULL(1);
+
+GByteArray *
+fu_common_get_random(guint bufsz, GError **error) G_GNUC_WARN_UNUSED_RESULT;
+gchar *
+fu_common_get_random_string(guint length, GError **error) G_GNUC_WARN_UNUSED_RESULT;
+
+void
+fu_xmlb_builder_insert_kv(XbBuilderNode *bn, const gchar *key, const gchar *value)
+    G_GNUC_NON_NULL(1);
+void
+fu_xmlb_builder_insert_kx(XbBuilderNode *bn, const gchar *key, guint64 value) G_GNUC_NON_NULL(1);
+void
+fu_xmlb_builder_insert_kb(XbBuilderNode *bn, const gchar *key, gboolean value) G_GNUC_NON_NULL(1);
