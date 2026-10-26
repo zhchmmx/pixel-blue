@@ -61,7 +61,9 @@ podman image exists "$PAYLOAD_IMAGE" || {
 # anaconda-live pulls the Web UI and its storage plugins; firefox is the Web
 # UI web engine. dracut-live provides dmsquash-live for the live rootfs, the
 # grub packages provide the EFI binaries and BIOS modules required by the ISO
-# contract, and rsync/ostree are used by the kickstart post-scripts.
+# contract, rsync/ostree are used by the kickstart post-scripts, and
+# policycoreutils provides the setfiles used to relabel the copied Flatpak
+# store in install-flatpaks.ks.
 dnf install -y \
   anaconda-live \
   dracut-live \
@@ -73,6 +75,7 @@ dnf install -y \
   libblockdev-lvm \
   livesys-scripts \
   ostree \
+  policycoreutils \
   rsync
 
 # --- Live session ----------------------------------------------------------
@@ -114,7 +117,7 @@ fi
 # after the image's zz0- override, so it wins for the live session only.
 cat >/usr/share/glib-2.0/schemas/zz99-pixel-blue-live.gschema.override <<'EOF'
 [org.gnome.shell]
-favorite-apps=['anaconda.desktop', 'org.mozilla.firefox.desktop', 'org.gnome.Nautilus.desktop', 'io.github.kolunmi.Bazaar.desktop']
+favorite-apps=['anaconda.desktop', 'org.mozilla.firefox.desktop', 'org.gnome.Nautilus.desktop']
 EOF
 glib-compile-schemas /usr/share/glib-2.0/schemas
 
@@ -195,7 +198,7 @@ install -Dm644 "$SCRIPT_DIR/anaconda/install-flatpaks.ks" \
 install -Dm644 "$SCRIPT_DIR/anaconda/restore-selinux-labels.ks" \
   /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 cat >/usr/share/anaconda/post-scripts/install-configure-upgrade.ks <<'EOF'
-%post --erroronfail --nochroot --interpreter=/usr/bin/bash
+%post --erroronfail --nochroot --interpreter=/usr/bin/bash --log=/tmp/install-configure-upgrade.log
 set -euxo pipefail
 
 # Anaconda installs the payload from containers-storage (offline). Point the
@@ -240,8 +243,8 @@ cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
 # Pixel Blue live install (titanoboa, issue #77).
 # The post-scripts in /usr/share/anaconda/post-scripts are auto-merged into
-# the kickstart by Anaconda (in name order, so restore-selinux-labels runs
-# last); %include-ing them here as well would execute every %post twice.
+# the kickstart by Anaconda (in name order); %include-ing them here as well
+# would execute every %post twice.
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
 EOF
 

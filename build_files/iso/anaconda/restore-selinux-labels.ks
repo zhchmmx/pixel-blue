@@ -1,9 +1,10 @@
-%post --erroronfail --interpreter=/usr/bin/bash
+%post --erroronfail --interpreter=/usr/bin/bash --log=/tmp/restore-selinux-labels.log
 set -euxo pipefail
 
-# The Flatpak tree is rsynced from the live image without SELinux labels
-# (--filter='-x security.selinux'), so relabel it with the installed policy.
+# The copied Flatpak store is relabelled in install-flatpaks.ks: it runs
+# setfiles -r with the stateroot as alternate root, using the deployment's
+# file_contexts, right after the rsync. All that is left here is the policy
+# store under /etc.
 setenforce 0 || true
 restorecon -R /etc/selinux
-restorecon -R /var/lib/flatpak
 %end
