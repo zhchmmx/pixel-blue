@@ -1,0 +1,7 @@
+# Make containers/image (podman, bootc) read the cosign signatures that
+# build.yml publishes as sha256-<manifest-digest>.sig tags. Without this,
+# sigstoreSigned policy requirements see no signatures at all and reject
+# every pull from the Pixel Blue repository.
+docker:
+  ghcr.io/zhchmmx/pixel-blue:
+    use-sigstore-attachments: true

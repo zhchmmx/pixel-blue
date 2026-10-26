@@ -10,9 +10,29 @@ Please note that this is just an experimental project; use it at your own risk.
 
 There are several ways for Pixelbook users to install this image on their device or just switch from another Universal Blue-based OS.
 
-## Option 1: Install Pixel Blue from ISO file (Not ready yet.)
+## Option 1: Install Pixel Blue from ISO file
 
+The ISO is a live image: it boots a GNOME desktop with an **Install Pixel Blue** launcher, so you can try the system before touching the disk. The installer uses a copy of the image embedded in the ISO (no network needed), copies the preinstalled Flatpak apps into the new system, and points the installed deployment at `ghcr.io/zhchmmx/pixel-blue` so `bootc upgrade` keeps working afterwards. As with the official Silverblue ISO, the installer only asks for the destination disk; the user account and timezone are set up on first boot.
 
+1. Grab the `pixel-blue-iso` artifact from a successful [Build disk images](https://github.com/zhchmmx/pixel-blue/actions/workflows/build-disk.yml) run on `main`. Only non-pull-request runs publish artifacts.
+2. Verify the download before writing it:
+   ``` bash
+   sha256sum -c pixel-blue.iso-CHECKSUM
+   ```
+3. Write `pixel-blue.iso` to a USB stick with Fedora Media Writer, `dd`, or Ventoy, then boot the Pixelbook from it. Pick **Pixel Blue Live**; if the desktop does not come up, use **Pixel Blue Live (Basic Graphics)**, which boots with `nomodeset`.
+4. Open **Install Pixel Blue** from the desktop or the app grid and choose the disk to install to. Reboot when it finishes and remove the USB stick.
+
+The boot menu and the ISO volume label come from `build_files/iso/iso.yaml`; the live/installer environment itself is the second image built by `Containerfile.iso` (it is never pushed to the registry, so the daily image stays lean).
+
+### Building the ISO locally
+
+``` bash
+just build          # build localhost/pixel-blue:latest
+just build-iso      # wraps it into build/pixel-blue.iso with ublue-os/titanoboa
+just run-vm-iso     # boot the ISO in QEMU
+```
+
+`just rebuild-iso` does the first two steps in one go. The titanoboa commit is pinned by `TITANOBOA_SHA` in `image-template.env` and must match the SHA in `.github/workflows/build-disk.yml`.
 
 ## Option 2: Switch to Pixel Blue
 

@@ -1,0 +1,40 @@
+# Live ISO layer for ublue-os/titanoboa (issue #77).
+#
+# This image is a thin layer on top of the published Pixel Blue image and is
+# only used as the source rootfs for titanoboa's ISO build. It is never
+# pushed: the published image stays the single source of truth for the
+# installed system, and the ISO payload is that same published image pulled
+# into /var/lib/containers/storage.
+#
+# Build with:
+#   sudo podman build \
+#     --cap-add sys_admin --security-opt label=disable \
+#     --build-arg BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest \
+#     --tag localhost/pixel-blue-iso:latest --file Containerfile.iso .
+#
+# The extra capabilities are required because the script runs podman and
+# flatpak inside the build to embed the installer payload and the Flatpak
+# preinstalls. The build output is a normal container image, not the ISO
+# itself; `just build-iso` (or the Build disk images workflow) hands it to
+# titanoboa.
+
+ARG BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest
+
+FROM scratch AS ctx
+COPY build_files/iso /iso
+COPY flatpak_refs /flatpak_refs
+COPY system_files/etc/containers /containers
+
+FROM ${BASE_IMAGE}
+
+ARG BASE_IMAGE
+ARG PAYLOAD_IMAGE
+RUN --mount=type=bind,from=ctx,source=/iso,target=/ctx/iso \
+    --mount=type=bind,from=ctx,source=/flatpak_refs,target=/ctx/flatpak_refs \
+    --mount=type=bind,from=ctx,source=/containers,target=/ctx/containers \
+    --mount=type=cache,dst=/var/cache \
+    --mount=type=cache,dst=/var/log \
+    --mount=type=tmpfs,dst=/tmp \
+    BASE_IMAGE="${BASE_IMAGE}" \
+    PAYLOAD_IMAGE="${PAYLOAD_IMAGE:-${BASE_IMAGE}}" \
+    /ctx/iso/build.sh

@@ -11,7 +11,7 @@
           "type": "sigstoreSigned",
           "keyPath": "/etc/pki/containers/pixel-blue.pub",
           "signedIdentity": {
-            "type": "matchExact"
+            "type": "matchRepository"
           }
         }
       ]

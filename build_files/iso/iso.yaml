@@ -1,0 +1,15 @@
+# Container-native ISO contract v0.1.0 configuration (issue #77).
+#
+# The label is the ISO volume label and must stay in sync with the
+# root=live:CDLABEL= arguments below (32 characters max).
+label: PixelBlue-Live
+grub2:
+  default: 0
+  timeout: 15
+  entries:
+    - name: "Pixel Blue Live"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb root=live:CDLABEL=PixelBlue-Live enforcing=0 rd.live.image"
+      initrd: "/images/pxeboot/initrd.img"
+    - name: "Pixel Blue Live (Basic Graphics)"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb root=live:CDLABEL=PixelBlue-Live enforcing=0 rd.live.image nomodeset"
+      initrd: "/images/pxeboot/initrd.img"
