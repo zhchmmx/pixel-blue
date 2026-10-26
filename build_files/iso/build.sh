@@ -242,9 +242,9 @@ sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
 cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
 # Pixel Blue live install (titanoboa, issue #77).
-# The post-scripts in /usr/share/anaconda/post-scripts are auto-merged into
-# the kickstart by Anaconda (in name order); %include-ing them here as well
-# would execute every %post twice.
+%include /usr/share/anaconda/post-scripts/install-flatpaks.ks
+%include /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
+%include /usr/share/anaconda/post-scripts/install-selinux-labels.ks
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
 EOF
 
