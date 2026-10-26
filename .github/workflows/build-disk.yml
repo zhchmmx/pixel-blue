@@ -200,6 +200,6 @@ jobs:
           sudo apt-get install -y rclone
           VERSION_PATH="$(dirname "$ISO_PATH")/pixel-blue.iso.version"
           echo "$(date -u +%Y%m%d).${{ github.run_number }}" > "$VERSION_PATH"
-          rclone copy "$VERSION_PATH" S3:${{ vars.S3_BUCKET_NAME }}
           rclone copy "$ISO_PATH" S3:${{ vars.S3_BUCKET_NAME }}
           rclone copy "$CHECKSUM_PATH" S3:${{ vars.S3_BUCKET_NAME }}
+          rclone copy "$VERSION_PATH" S3:${{ vars.S3_BUCKET_NAME }}
