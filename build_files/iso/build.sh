@@ -43,8 +43,10 @@ fi
 # summary, but Anaconda enumerates the media repo through the ostree remote
 # API (list_remote_refs_sync("Anaconda") on file:///flatpak/repo), which fails
 # without one ("Server does not have a summary file", flatpak-error-quark 11).
-# Write it so the repo is a servable ostree repo.
-ostree summary -u -r /var/lib/flatpak/repo
+# Write it so the repo is a servable ostree repo. The repo selector is the
+# generic --repo=PATH option; summary has no -r/-f short option (the -r used
+# by pull-family commands aborts the build with "Unknown option -r").
+ostree summary -u --repo=/var/lib/flatpak/repo
 [ -s /var/lib/flatpak/repo/summary ] || {
   echo "error: no ostree summary in /var/lib/flatpak/repo" >&2
   exit 1
