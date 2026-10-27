@@ -39,19 +39,34 @@ if [ -z "$installed_flatpaks" ]; then
   exit 1
 fi
 
+# The flatpak CLI builds a plain local ostree repo and never publishes a
+# summary, but Anaconda enumerates the media repo through the ostree remote
+# API (list_remote_refs_sync("Anaconda") on file:///flatpak/repo), which fails
+# without one ("Server does not have a summary file", flatpak-error-quark 11).
+# Write it so the repo is a servable ostree repo.
+ostree summary -u -r /var/lib/flatpak/repo
+[ -s /var/lib/flatpak/repo/summary ] || {
+  echo "error: no ostree summary in /var/lib/flatpak/repo" >&2
+  exit 1
+}
+
 # Anaconda's RPM-OSTREE payload installs Flatpaks natively into the target
 # during the install when /flatpak/repo exists in the installer environment
 # (FlatpakManager.is_source_available() checks isdir("/flatpak/repo")). It
 # installs every ref in that repo into the target's /var/lib/flatpak (the
 # stateroot var, through the deployment's var symlink) with proper
 # deployments, refs and exports, then adds the flathub remote from the
-# [Payload] flatpak_remote setting. This replaces the previous post-script
-# rsync snapshot, whose copy never showed up on the installed system.
+# [Payload] flatpak_remote setting (keyless; the install-configure-upgrade
+# post-script drops it so /etc/flatpak/remotes.d owns flathub on first boot).
+# This replaces the previous post-script rsync snapshot, whose copy never
+# showed up on the installed system.
 ln -s /var/lib/flatpak /flatpak
 mkdir -p /etc/anaconda/conf.d
+# Anaconda stores this URL verbatim as the flathub remote's base URL, so it
+# must be the repo URL, not the .flatpakrepo redirect file.
 cat >/etc/anaconda/conf.d/pixel-blue-flatpak.conf <<'EOF'
 [Payload]
-flatpak_remote = flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak_remote = flathub https://dl.flathub.org/repo/
 EOF
 
 # --- Installer payload -----------------------------------------------------
@@ -246,6 +261,20 @@ for origin in "${origins[@]}"; do
     "${deploy_dir}/etc/containers/policy.json"
   install -Dm644 /etc/containers/registries.d/pixel-blue.yaml \
     "${deploy_dir}/etc/containers/registries.d/pixel-blue.yaml"
+done
+
+# Anaconda's payload adds the [Payload] flatpak_remote to the target with
+# gpg-verify=true but no signing key (hardcoded in its FlatpakManager; the
+# remote is committed into <repo>/config as [remote "flathub"]). Without the
+# key, that stale group also blocks /etc/flatpak/remotes.d/flathub.flatpakrepo
+# (correct URL and GPG key) from being re-applied by flatpak-system-helper on
+# first boot, so "flatpak update" of the preinstalled apps would fail forever.
+# Delete the group and any key files; remotes.d then owns flathub again.
+# --nochroot: the repo lives under the stateroot var of the deployed tree.
+for repo in /mnt/sysimage/ostree/deploy/*/var/lib/flatpak/repo; do
+  [ -f "$repo/config" ] || continue
+  ostree remote delete --repo="$repo" flathub 2>/dev/null || true
+  rm -f "$repo/remotes/flathub" "$repo/remotes/flathub.pks"
 done
 %end
 EOF
