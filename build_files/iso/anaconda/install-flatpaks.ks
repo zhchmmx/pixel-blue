@@ -64,13 +64,36 @@ for origin in "${origins[@]}"; do
   # plain restorecon of the /mnt/sysimage path would be a silent no-op and
   # leave the store unlabeled on the enforcing target (restorecon's -r flag
   # is plain recursion; only setfiles takes an alternate root).
+  #
+  # setfiles in libselinux 3.11 (Fedora 44) does not canonicalize its
+  # pathname arguments and refuses to follow symlinks in the path
+  # (O_NOFOLLOW|O_DIRECTORY yields ENOTDIR, logged as "open(...): Not a
+  # directory"). bootc images expose the sysroot through the historical
+  # /ostree -> sysroot/ostree compatibility symlink, and find reports the
+  # /mnt/sysimage/ostree/... path, so canonicalize the stateroot root
+  # before relabeling. Upstream defaulted setfiles to
+  # SELINUX_RESTORECON_REALPATH instead (SELinuxProject/selinux#540);
+  # realpath is a no-op when there is no symlink.
   selinuxtype="$(sed -n 's/^SELINUXTYPE=//p' "$deploydir/etc/selinux/config" | head -n1)"
   file_contexts="$deploydir/etc/selinux/${selinuxtype:-targeted}/contexts/files/file_contexts"
   if [ ! -f "$file_contexts" ]; then
     echo "error: $file_contexts missing from the installed system" >&2
     exit 1
   fi
-  setfiles -F -r "$(dirname "$stateroot_var")" "$file_contexts" "$stateroot_var/lib"
+  stateroot_root="$(realpath "$(dirname "$stateroot_var")")"
+  image_root="$(realpath /mnt/sysimage)"
+  if [ "${stateroot_root#"$image_root"/}" = "$stateroot_root" ]; then
+    echo "error: stateroot $stateroot_root resolved outside $image_root" >&2
+    exit 1
+  fi
+  # setfiles matches the pathname it is given against file_contexts, so
+  # var/lib must stay real directories under the canonical root; resolving
+  # a symlinked var/lib would change the /var/lib path it looks up.
+  if [ "$(realpath "$stateroot_var/lib")" != "$stateroot_root/var/lib" ]; then
+    echo "error: $stateroot_var/lib is not a plain directory under $stateroot_root" >&2
+    exit 1
+  fi
+  setfiles -F -r "$stateroot_root" "$file_contexts" "$stateroot_root/var/lib"
 
   sync
 done
