@@ -4,7 +4,8 @@
 # Runs inside Containerfile.iso on top of the published Pixel Blue image. It
 # adds everything the Container-native ISO contract (v0.1.0) needs and the
 # live install experience: a GNOME live session, Anaconda, an offline copy of
-# the same image as the install payload, and the Flatpak preinstalls.
+# the same image as the install payload, and the Flatpak preinstalls that
+# Anaconda installs into the target at install time.
 #
 # This image is never pushed; titanoboa squashes it into the ISO.
 
@@ -38,6 +39,21 @@ if [ -z "$installed_flatpaks" ]; then
   exit 1
 fi
 
+# Anaconda's RPM-OSTREE payload installs Flatpaks natively into the target
+# during the install when /flatpak/repo exists in the installer environment
+# (FlatpakManager.is_source_available() checks isdir("/flatpak/repo")). It
+# installs every ref in that repo into the target's /var/lib/flatpak (the
+# stateroot var, through the deployment's var symlink) with proper
+# deployments, refs and exports, then adds the flathub remote from the
+# [Payload] flatpak_remote setting. This replaces the previous post-script
+# rsync snapshot, whose copy never showed up on the installed system.
+ln -s /var/lib/flatpak /flatpak
+mkdir -p /etc/anaconda/conf.d
+cat >/etc/anaconda/conf.d/pixel-blue-flatpak.conf <<'EOF'
+[Payload]
+flatpak_remote = flathub https://flathub.org/repo/flathub.flatpakrepo
+EOF
+
 # --- Installer payload -----------------------------------------------------
 # Anaconda installs from containers-storage, so the image the ISO installs
 # must be present inside the live rootfs. Pull the same published image the
@@ -61,9 +77,8 @@ podman image exists "$PAYLOAD_IMAGE" || {
 # anaconda-live pulls the Web UI and its storage plugins; firefox is the Web
 # UI web engine. dracut-live provides dmsquash-live for the live rootfs, the
 # grub packages provide the EFI binaries and BIOS modules required by the ISO
-# contract, rsync/ostree are used by the kickstart post-scripts, and
-# policycoreutils provides the setfiles used to relabel the copied Flatpak
-# store in install-flatpaks.ks.
+# contract, and policycoreutils provides restorecon used by the
+# restore-selinux-labels post-script.
 dnf install -y \
   anaconda-live \
   dracut-live \
@@ -74,9 +89,7 @@ dnf install -y \
   libblockdev-dm \
   libblockdev-lvm \
   livesys-scripts \
-  ostree \
-  policycoreutils \
-  rsync
+  policycoreutils
 
 # --- Live session ----------------------------------------------------------
 # livesys creates liveuser, enables GDM autologin and starts the session
@@ -191,10 +204,10 @@ systemd-firstboot --timezone UTC
 # --- Anaconda defaults -----------------------------------------------------
 # The destination-only Silverblue flow comes from the stock fedora-silverblue
 # profile: the main image preserves ID=fedora and VARIANT_ID=silverblue.
-# These post-scripts add the offline payload, the Flatpak preinstalls and the
-# registry origin rewrite.
-install -Dm644 "$SCRIPT_DIR/anaconda/install-flatpaks.ks" \
-  /usr/share/anaconda/post-scripts/install-flatpaks.ks
+# These post-scripts add the registry origin rewrite and the SELinux label
+# fix; the Flatpak apps are installed by Anaconda's payload at install time
+# (see the /flatpak symlink and anaconda.conf drop-in in the Flatpak
+# section), not by a post-script.
 install -Dm644 "$SCRIPT_DIR/anaconda/restore-selinux-labels.ks" \
   /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 cat >/usr/share/anaconda/post-scripts/install-configure-upgrade.ks <<'EOF'
@@ -248,7 +261,6 @@ cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
   # ScriptsModule, which sees just the scripts from the parsed kickstart
   # (includes expanded). A post-script not %include'd here runs zero times
   # on Fedora 44 — keep this list in sync when adding one.
-  %include /usr/share/anaconda/post-scripts/install-flatpaks.ks
 %include /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
 %include /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
