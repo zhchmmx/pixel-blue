@@ -166,6 +166,9 @@ jobs:
           set -euxo pipefail
           out="${RUNNER_TEMP}/iso-out"
           mkdir -p "${out}"
+          # Fedora bootc containers do not declare a root filesystem and
+          # image-builder refuses to guess one, so pass the same ext4 default
+          # bootc-image-builder uses for the qcow2/raw images.
           sudo podman run --rm \
             --privileged \
             --pull=newer \
@@ -177,6 +180,7 @@ jobs:
             --output-dir /output \
             --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
             --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            --bootc-default-fs ext4 \
             --progress verbose \
             bootc-installer
 

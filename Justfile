@@ -491,6 +491,9 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
     iso_out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
     trap 'rm -rf "${iso_out}"' EXIT
     mkdir -p build
+    # Fedora bootc containers do not declare a root filesystem and
+    # image-builder refuses to guess one, so pass the same ext4 default
+    # bootc-image-builder uses for the qcow2/raw images.
     sudo podman run --rm \
       --privileged \
       --pull=newer \
@@ -502,6 +505,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       --output-dir /output \
       --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
       --bootc-installer-payload-ref "${payload_image}" \
+      --bootc-default-fs ext4 \
       --progress verbose \
       bootc-installer
 
