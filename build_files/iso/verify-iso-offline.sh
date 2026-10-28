@@ -64,17 +64,27 @@ ks_file="$(extract_file usr/share/anaconda/interactive-defaults.ks "${work}/ks" 
 grep -F -- "bootc --source-imgref containers-storage:${payload_ref} --target-imgref ${payload_ref}" \
   "${ks_file}"
 
-# 2. The payload must be in the embedded container storage: the tagged
-#    reference lives in the storage metadata db (sqlite, text-ish; the layer
-#    data itself sits under var/lib/containers/storage/overlay/).
-db_file="$(extract_file var/lib/containers/storage/db.sql "${work}/db" || true)"
-[ -n "${db_file}" ] || {
-  echo "error: no containers-storage metadata db inside the ISO squashfs" >&2
+# 2. The payload must be in the embedded container storage. Where the tagged
+#    reference string lands is a containers-storage implementation detail
+#    (db.sql sqlite pages, plus per-image link/image.json metadata), so grep
+#    the whole small-metadata set: db.sql, overlay-images/*/image.json and
+#    overlay/*/link. Layer data lives under overlay-layers/ and is not
+#    searched.
+meta_paths="$(awk '$NF ~ /var\/lib\/containers\/storage\/(db\.sql|overlay-images\/[^/]+\/image\.json|overlay\/[^/]+\/link)$/ { print $NF }' "${work}/listing")"
+[ -n "${meta_paths}" ] || {
+  echo "error: no containers-storage metadata inside the ISO squashfs" >&2
   exit 1
 }
-grep -a -F -- "${payload_ref}" "${db_file}" >/dev/null || {
-  echo "error: ${payload_ref} not found in the embedded container storage" >&2
+while read -r p; do
+  [ -n "${p}" ] || continue
+  rel="${p#"${p%%var/*}"}"
+  unsquashfs -quiet -dest "${work}/meta" -force "${work}/live.img" "${rel}" >/dev/null 2>&1 || true
+done <<< "${meta_paths}"
+if ! grep -a -r -F -- "${payload_ref}" "${work}/meta" >/dev/null; then
+  echo "error: ${payload_ref} not found in the embedded container storage metadata" >&2
+  echo "diagnostic - ghcr/pixel-blue strings actually present:" >&2
+  grep -a -h -r -o -i -E '[^"]*(ghcr|pixel-blue)[^"]*' "${work}/meta" 2>/dev/null | head -10 >&2
   exit 1
-}
+fi
 
 echo "OK: ${iso} embeds ${payload_ref} and installs from containers-storage (offline)."
