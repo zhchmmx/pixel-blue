@@ -440,24 +440,26 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build a live install ISO with osbuild image-builder (bootc-generic-iso)
+# Build the install ISO with osbuild image-builder (bootc-installer)
 #
-# The ISO boots a GNOME live session served from the container squashfs.
-# Anaconda installs the container image from the containers-storage copy
-# embedded in that squashfs (offline), copies the Flatpak apps listed in
-# flatpak_refs/ into the target and repoints the installed deployment at the
-# signed GHCR image. The live/installer environment is a second image built
-# from Containerfile.iso and is never pushed.
+# The ISO boots Anaconda. It installs the published Pixel Blue image from a
+# containers-storage copy embedded in the ISO, and installs the Flatpaks listed
+# in flatpak_refs/ out of the local ostree repo baked into the installer image
+# -- both before the first boot and both without any network access. There is
+# no live desktop: this is an installer, not a live session.
 #
-# $target_image/$tag select the image used for the live environment; build it
-# first (or use `just rebuild-iso`). $payload_image is the registry reference
-# embedded for the offline install AND recorded as the installed system's
-# origin, so it must stay pullable; it defaults to GHCR:$tag.
+# $target_image/$tag select the payload image; $payload_image is the registry
+# reference embedded for the offline install AND recorded as the installed
+# system's origin, so it must stay pullable; it defaults to GHCR:$tag.
 #
 # image-builder never talks to a registry: it copies the payload out of the
 # host's rootful container storage, so the payload is pulled here first, with
 # this repo's cosign policy installed, so the pull is verified exactly like a
 # real client would verify it.
+#
+# The install itself is interactive (no kickstart is passed), so the user picks
+# the target disk in Anaconda. Add --config <file.toml> here to make it
+# unattended.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -467,15 +469,14 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # The ISO layer installs Flatpaks inside the build, whose bwrap sandbox
-    # needs sys_admin and unconfined labels.
+    # Installer environment: the payload plus Anaconda and /flatpak/repo.
+    # Flatpak runs inside this build (bwrap needs sys_admin), hence the caps.
     sudo podman build \
       --cap-add sys_admin \
       --security-opt label=disable \
       --build-arg BASE_IMAGE="{{ target_image }}:{{ tag }}" \
-      --build-arg PAYLOAD_IMAGE="${payload_image}" \
-      --tag "localhost/{{ image_name }}-iso:{{ tag }}" \
-      --file Containerfile.iso .
+      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
+      --file Containerfile.installer .
 
     # Install this repo's containers policy on the host first, so the pull
     # below enforces the cosign signature instead of trusting anything.
@@ -499,10 +500,10 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       "{{ image_builder_image }}" \
       build \
       --output-dir /output \
-      --bootc-ref "localhost/{{ image_name }}-iso:{{ tag }}" \
+      --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
       --bootc-installer-payload-ref "${payload_image}" \
       --progress verbose \
-      bootc-generic-iso
+      bootc-installer
 
     # The layout under --output-dir is image-builder's business (it nests by
     # name/type/arch), so find the ISO instead of guessing a path.

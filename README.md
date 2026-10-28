@@ -24,13 +24,18 @@ just run-vm-iso     # boot the ISO in QEMU
 
 `just rebuild-iso` does the first two steps in one go.
 
-The ISO is built by [osbuild image-builder](https://github.com/osbuild/image-builder)
-as a `bootc-generic-iso` artifact. `Containerfile.iso` produces the
-live/installer rootfs (GNOME live session, Anaconda, the Flatpak preinstalls
-and the branded installer entry point); `build_files/iso/iso.yaml` supplies the
-ISO label and the GRUB menu. The install payload is the published image,
-copied into the ISO's container storage at build time, so installing from the
-ISO needs no network at all. The builder image is pinned by
+The ISO is an **installer**, not a live session: it boots straight into Anaconda,
+where you pick the target disk. Building it takes two images:
+
+- `Containerfile.installer` — the environment Anaconda runs in. Besides Anaconda
+  it carries `/flatpak/repo`, a local Flatpak ostree repo built from
+  `flatpak_refs/`. Anaconda installs every app in it into the target's
+  `/var/lib/flatpak` **during the installation**, so the Flatpaks are there on
+  the first boot — no network, no first-boot script.
+- the published `pixel-blue` image itself, embedded as the install payload.
+
+The ISO is produced by [osbuild image-builder](https://github.com/osbuild/image-builder)
+as a `bootc-installer` artifact; the builder image is pinned by
 `IMAGE_BUILDER_IMAGE` in `image-template.env`.
 
 ## Option 2: Switch to Pixel Blue

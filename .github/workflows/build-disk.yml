@@ -10,7 +10,7 @@ on:
         default: false
         type: boolean
       upload-iso-to-s3:
-        description: "Upload the Anaconda ISO to S3"
+        description: "Upload the install ISO to S3"
         required: false
         default: false
         type: boolean
@@ -19,8 +19,8 @@ on:
       - main
       - testing
     paths:
-      - 'Containerfile.iso'
-      - 'build_files/iso/**'
+      - 'Containerfile.installer'
+      - 'build_files/installer/**'
       - 'disk_config/disk.toml'
       - 'flatpak_refs/**'
       - '.github/workflows/build-disk.yml'
@@ -106,15 +106,14 @@ jobs:
           sudo apt-get install -y rclone
           rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
-  # Live install ISO, built with osbuild image-builder (bootc-generic-iso).
-  # The ISO boots a GNOME live session served from the container squashfs;
-  # Anaconda installs the container image from a containers-storage copy
-  # embedded in that squashfs (offline), copies the Flatpak apps from
-  # flatpak_refs/ into the target and repoints the installed deployment at the
-  # signed GHCR image. The live/installer environment is a second image built
-  # from Containerfile.iso and is never pushed.
+  # Install ISO, built with osbuild image-builder (bootc-installer).
+  # The ISO boots Anaconda; it installs the published image from a
+  # containers-storage copy embedded in the ISO and the Flatpaks from
+  # flatpak_refs/ out of the local ostree repo baked into the installer image.
+  # Both happen before the first boot and need no network. There is no live
+  # desktop -- this is an installer, not a live session.
   build-iso:
-    name: Build live ISO
+    name: Build install ISO
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -135,19 +134,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Build live ISO layer
+      - name: Build installer image
         run: |
           set -euxo pipefail
           BASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
-          # The layer installs Flatpaks inside the build, whose bwrap sandbox
-          # needs the extra capabilities and unconfined labels.
+          # Flatpak runs inside this build, so bwrap needs sys_admin and
+          # unconfined labels.
           sudo podman build \
             --cap-add sys_admin \
             --security-opt label=disable \
             --build-arg BASE_IMAGE="${BASE_IMAGE}" \
-            --build-arg PAYLOAD_IMAGE="${BASE_IMAGE}" \
-            --tag "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
-            --file Containerfile.iso .
+            --tag "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
+            --file Containerfile.installer .
 
       - name: Pull install payload into rootful storage
         run: |
@@ -176,10 +174,10 @@ jobs:
             "${IMAGE_BUILDER_IMAGE}" \
             build \
             --output-dir /output \
-            --bootc-ref "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
+            --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
             --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
             --progress verbose \
-            bootc-generic-iso
+            bootc-installer
 
           # The layout under --output-dir is image-builder's business (it
           # nests by name/type/arch), so find the ISO instead of guessing.
