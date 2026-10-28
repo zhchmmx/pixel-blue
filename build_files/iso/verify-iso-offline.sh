@@ -116,6 +116,9 @@ if ! grep -a -r -F -- "${payload_ref}" "${work}/meta" >/dev/null; then
   fi
   echo "diagnostic - ghcr/pixel-blue strings in extracted metadata:" >&2
   grep -a -h -r -o -i -E '[^"]*(ghcr|pixel-blue)[^"]*' "${work}/meta" 2>/dev/null | head -10 >&2 || true
+  echo "diagnostic - store structure from the listing:" >&2
+  grep -E 'containers/storage/([^/]+|overlay/[^/]+|overlay-images(/[^/]+)?|overlay-layers(/[^/]+)?|overlay/layers|references(/[^/]+)*)$' \
+    "${work}/listing" | head -30 >&2 || true
   exit 1
 fi
 
