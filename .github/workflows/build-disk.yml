@@ -155,6 +155,7 @@ jobs:
           # be there before the ISO is assembled. Installing this repo's
           # policy first makes the pull verify the cosign signature, exactly
           # like a client would.
+          sudo install -Dm644 system_files/etc/pki/containers/pixel-blue.pub /etc/pki/containers/pixel-blue.pub
           sudo install -Dm644 system_files/etc/containers/policy.json /etc/containers/policy.json
           sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml /etc/containers/registries.d/pixel-blue.yaml
           sudo podman pull "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
