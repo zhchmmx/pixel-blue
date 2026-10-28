@@ -1,22 +1,33 @@
-# Live ISO layer for ublue-os/titanoboa (issue #77).
+# Live/installer layer for the Pixel Blue ISO.
 #
-# This image is a thin layer on top of the published Pixel Blue image and is
-# only used as the source rootfs for titanoboa's ISO build. It is never
-# pushed: the published image stays the single source of truth for the
-# installed system, and the ISO payload is that same published image pulled
-# into /var/lib/containers/storage.
+# This image is a thin layer on top of the published Pixel Blue image. It is
+# the rootfs of the ISO's live system and the environment Anaconda runs in; it
+# is never pushed, and the published image stays the single source of truth
+# for the installed system.
+#
+# It is consumed by osbuild image-builder as the `bootc-generic-iso` input:
+#
+#   image-builder build \
+#     --bootc-ref localhost/pixel-blue-iso:latest \
+#     --bootc-installer-payload-ref ghcr.io/zhchmmx/pixel-blue:latest \
+#     bootc-generic-iso
+#
+# The install payload is NOT baked in here: image-builder copies it out of the
+# host's rootful container storage into /var/lib/containers/storage inside the
+# squashfs (that is what --bootc-installer-payload-ref does), which keeps this
+# layer free of nested podman.
 #
 # Build with:
 #   sudo podman build \
 #     --cap-add sys_admin --security-opt label=disable \
 #     --build-arg BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest \
+#     --build-arg PAYLOAD_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest \
 #     --tag localhost/pixel-blue-iso:latest --file Containerfile.iso .
 #
-# The extra capabilities are required because the script runs podman and
-# flatpak inside the build to embed the installer payload and the Flatpak
-# preinstalls. The build output is a normal container image, not the ISO
-# itself; `just build-iso` (or the Build disk images workflow) hands it to
-# titanoboa.
+# The extra capabilities are required because the script installs Flatpaks
+# inside the build (bwrap needs a writable /proc/sys). `just build-iso` (or the
+# Build disk images workflow) does this and then hands the image to
+# image-builder.
 
 ARG BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest
 

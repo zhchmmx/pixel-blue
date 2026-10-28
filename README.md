@@ -18,11 +18,20 @@ Visit [Pixel Blue Download Page](https://pixel-blue.pages.dev/) to download the 
 
 ```bash
 just build          # build localhost/pixel-blue:latest
-just build-iso      # wraps it into build/pixel-blue.iso with ublue-os/titanoboa
+just build-iso      # wraps it into build/pixel-blue.iso with osbuild image-builder
 just run-vm-iso     # boot the ISO in QEMU
 ```
 
-`just rebuild-iso` does the first two steps in one go. The titanoboa commit is pinned by `TITANOBOA_SHA` in `image-template.env` and must match the SHA in `.github/workflows/build-disk.yml`.
+`just rebuild-iso` does the first two steps in one go.
+
+The ISO is built by [osbuild image-builder](https://github.com/osbuild/image-builder)
+as a `bootc-generic-iso` artifact. `Containerfile.iso` produces the
+live/installer rootfs (GNOME live session, Anaconda, the Flatpak preinstalls
+and the branded installer entry point); `build_files/iso/iso.yaml` supplies the
+ISO label and the GRUB menu. The install payload is the published image,
+copied into the ISO's container storage at build time, so installing from the
+ISO needs no network at all. The builder image is pinned by
+`IMAGE_BUILDER_IMAGE` in `image-template.env`.
 
 ## Option 2: Switch to Pixel Blue
 

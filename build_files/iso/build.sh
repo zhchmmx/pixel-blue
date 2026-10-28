@@ -1,12 +1,31 @@
 #!/usr/bin/bash
-# Build the Pixel Blue live-ISO layer (issue #77).
+# Build the Pixel Blue live/installer layer.
 #
-# Runs inside Containerfile.iso on top of the published Pixel Blue image. It
-# adds everything the Container-native ISO contract (v0.1.0) needs and the
-# live install experience: a GNOME live session, Anaconda, an offline copy of
-# the same image as the install payload, and the Flatpak preinstalls.
+# This image is *not* the ISO. It is the rootfs that osbuild image-builder
+# squashes into /LiveOS/squashfs.img when it builds the `bootc-generic-iso`
+# artifact: the ISO's live system is exactly this image, and the installer
+# (Anaconda) runs from it.
 #
-# This image is never pushed; titanoboa squashes it into the ISO.
+# Everything image-builder needs from this container lives here, because the
+# container is the contract (see the ISOs page of the image-builder docs,
+# osbuild.org/docs/developer-guide/projects/image-builder/advanced/bootc/isos):
+#
+#   1. kernel          /usr/lib/modules/<kver>/vmlinuz        (exactly one)
+#   2. initramfs       /usr/lib/modules/<kver>/initramfs.img
+#   3. UEFI vendor     /usr/lib/efi/shim/*/EFI/<vendor>
+#   4. EFI binaries    /boot/efi/EFI/<vendor>/{shimx64,grubx64}.efi
+#   5. grub modules    /usr/lib/grub/i386-pc + /usr/share/grub2/unicode.pf
+#   6. ISO config      /usr/lib/image-builder/bootc/iso.yaml
+#   7. build tools     mksquashfs xorriso implantisomd5 grub2-mkimage python3
+#
+# The script asserts every one of those at the end. Without the assertions a
+# broken contract only surfaces inside osbuild, in a much less readable form.
+#
+# What this image deliberately does NOT contain: the install payload. The
+# published Pixel Blue image is handed to image-builder by `just build-iso`
+# as --bootc-installer-payload-ref, which copies it from the host's rootful
+# container storage into the squashfs at /var/lib/containers/storage. That
+# keeps the layer small and avoids running podman inside the build.
 
 set -euxo pipefail
 
@@ -19,13 +38,16 @@ export TMPDIR=/tmp
 mkdir -p "$(realpath /root)"
 
 # Flatpak's bwrap sandbox writes /proc/sys/user/max_user_namespaces, which is
-# read-only by default in the build container. Titanoboa's CI builds with
+# read-only by default in the build container. The build runs with
 # --cap-add sys_admin, which makes this remount work.
 mount -o remount,rw /proc/sys
 
 # --- Flatpak payload -------------------------------------------------------
-# The base image already ships /etc/flatpak/remotes.d/flathub.flatpakrepo;
-# make sure the system installation knows the remote before installing.
+# The Flatpak preinstalls ride along inside this image (/var/lib/flatpak) and
+# the installer rsyncs them into the target at install time, so the installed
+# system has them without any network access. The base image already ships
+# /etc/flatpak/remotes.d/flathub.flatpakrepo; make sure the system
+# installation knows the remote before installing.
 flatpak remote-add --system --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo
 find /ctx/flatpak_refs -maxdepth 1 -type f -print0 |
@@ -38,42 +60,34 @@ if [ -z "$installed_flatpaks" ]; then
   exit 1
 fi
 
-# --- Installer payload -----------------------------------------------------
-# Anaconda installs from containers-storage, so the image the ISO installs
-# must be present inside the live rootfs. Pull the same published image the
-# ISO layer is built from; it is never the ISO layer itself.
-#
-# The pull must verify the payload's cosign signature. The published base
-# image may still carry an older (or no) containers configuration, so install
-# the repo's current one first: registries.d enables reading the cosign .sig
-# tags and the policy accepts cosign's repo-level signature identity for a
-# tagged pull.
-install -Dm644 /ctx/containers/policy.json /etc/containers/policy.json
-install -Dm644 /ctx/containers/registries.d/pixel-blue.yaml \
-  /etc/containers/registries.d/pixel-blue.yaml
-podman pull "$PAYLOAD_IMAGE"
-podman image exists "$PAYLOAD_IMAGE" || {
-  echo "error: payload image $PAYLOAD_IMAGE is missing from container storage" >&2
-  exit 1
-}
-
 # --- Live/installer packages ----------------------------------------------
 # anaconda-live pulls the Web UI and its storage plugins; firefox is the Web
-# UI web engine. dracut-live provides dmsquash-live for the live rootfs, the
-# grub packages provide the EFI binaries and BIOS modules required by the ISO
-# contract, and rsync/ostree are used by the kickstart post-scripts.
+# UI web engine. dracut-live provides dmsquash-live for the live rootfs.
+# grub2-efi-x64-cdboot + grub2-pc-modules + grub2-common provide the EFI
+# binaries, the BIOS modules and unicode.pf that bootc-generic-iso puts on
+# the ISO. squashfs-tools/xorriso/isomd5sum/grub2-tools are the contract's
+# build tools (item 7) -- image-builder ships its own copies, but keeping
+# them here means an uncontainerised `image-builder` run also works.
+# rsync/ostree are used by the kickstart post-scripts.
 dnf install -y \
   anaconda-live \
   dracut-live \
   firefox \
+  grub2-common \
   grub2-efi-x64-cdboot \
   grub2-pc-modules \
+  grub2-tools \
+  grub2-tools-minimal \
+  isomd5sum \
   libblockdev-btrfs \
   libblockdev-dm \
   libblockdev-lvm \
   livesys-scripts \
   ostree \
-  rsync
+  python3 \
+  rsync \
+  squashfs-tools \
+  xorriso
 
 # --- Live session ----------------------------------------------------------
 # livesys creates liveuser, enables GDM autologin and starts the session
@@ -133,7 +147,9 @@ fi
 # --- Live boot initramfs ---------------------------------------------------
 # dmsquash-live mounts the ISO's squashfs as the live root; the autooverlay
 # module gives it a writable tmpfs upper. Regenerate every kernel initramfs
-# with dracut-live, keeping the image's dracut configuration.
+# with dracut-live, keeping the image's dracut configuration. This *replaces*
+# the image's generic initrd: the squashfs ships exactly one, at the
+# contract's path, and it has to be the live one.
 for kdir in /usr/lib/modules/*; do
   [ -f "$kdir/modules.dep" ] || continue
   kver="$(basename "$kdir")"
@@ -151,15 +167,27 @@ for kdir in /usr/lib/modules/*; do
   fi
 done
 
-# --- Container-native ISO contract ----------------------------------------
-# UEFI binaries (shim/grub2) and the ISO label/menu. /boot/efi is not part of
-# the installed system; titanoboa only reads it to build the ISO's ESP.
+# --- ISO contract: EFI binaries and menu -----------------------------------
+# /boot/efi is not part of the installed system; image-builder only reads it
+# to build the ISO's ESP.
 mkdir -p /boot/efi
 cp -av /usr/lib/efi/*/*/EFI /boot/efi/
 cp -v /boot/efi/EFI/fedora/grubx64.efi /boot/efi/EFI/BOOT/fbx64.efi
 
+# The ISO label and the GRUB menu live in iso.yaml. image-builder reads it
+# from /usr/lib/image-builder/bootc/; the historical
+# /usr/lib/bootc-image-builder/ prefix still works but is deprecated, and the
+# prefix is resolved once for all files, so never spread files across both.
 install -Dm644 "$SCRIPT_DIR/iso.yaml" \
-  /usr/lib/bootc-image-builder/iso.yaml
+  /usr/lib/image-builder/bootc/iso.yaml
+
+# The containers configuration is *not* needed to pull anything at build time
+# any more (the payload pull happens on the host). It is needed at install
+# time: install-configure-upgrade.ks seeds these files into the deployment so
+# the installed system can verify the signed origin on `bootc upgrade`.
+install -Dm644 /ctx/containers/policy.json /etc/containers/policy.json
+install -Dm644 /ctx/containers/registries.d/pixel-blue.yaml \
+  /etc/containers/registries.d/pixel-blue.yaml
 
 # --- Live-only boot tweaks -------------------------------------------------
 # / on a live ISO is an overlay whose upperdir lives under /run (a small
@@ -238,12 +266,70 @@ sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
 
 cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
-# Pixel Blue live install (titanoboa, issue #77).
+# Pixel Blue live install.
 # The post-scripts in /usr/share/anaconda/post-scripts are auto-merged into
 # the kickstart by Anaconda (in name order, so restore-selinux-labels runs
 # last); %include-ing them here as well would execute every %post twice.
+#
+# --transport=containers-storage reads the payload that image-builder copied
+# into /var/lib/containers/storage, so the install needs no network at all.
+# Signature verification is skipped here (offline, and the payload is the
+# image this ISO was built from); the *installed* origin is still the signed
+# registry reference, so upgrades stay verified.
 ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
 EOF
+
+# --- Contract assertions ---------------------------------------------------
+# Fail here, with a readable message, instead of inside osbuild.
+kernels=0
+for kdir in /usr/lib/modules/*; do
+  [ -f "$kdir/vmlinuz" ] || continue
+  kernels=$((kernels + 1))
+  [ -f "$kdir/initramfs.img" ] || {
+    echo "error: $kdir/initramfs.img missing (contract item 2)" >&2
+    exit 1
+  }
+done
+if [ "$kernels" -ne 1 ]; then
+  echo "error: expected exactly one kernel in /usr/lib/modules, found $kernels" >&2
+  echo "       bootc-generic-iso defines the behaviour for multiple kernels as undefined" >&2
+  exit 1
+fi
+
+vendor_dir=""
+for d in /usr/lib/efi/shim/*/EFI/*; do
+  [ -d "$d" ] || continue
+  if [ "$(basename "$d")" = BOOT ]; then continue; fi
+  vendor_dir="$(basename "$d")"
+done
+if [ -z "$vendor_dir" ]; then
+  echo "error: no UEFI vendor directory under /usr/lib/efi/shim/*/EFI (contract item 3)" >&2
+  exit 1
+fi
+for f in shimx64.efi grubx64.efi; do
+  [ -f "/boot/efi/EFI/${vendor_dir}/${f}" ] || {
+    echo "error: /boot/efi/EFI/${vendor_dir}/${f} missing (contract item 4)" >&2
+    exit 1
+  }
+done
+
+for f in /usr/lib/image-builder/bootc/iso.yaml \
+  /usr/share/grub2/unicode.pf; do
+  [ -f "$f" ] || {
+    echo "error: $f missing (contract items 5/6)" >&2
+    exit 1
+  }
+done
+if [ "$(uname -m)" = x86_64 ] && [ ! -d /usr/lib/grub/i386-pc ]; then
+  echo "error: /usr/lib/grub/i386-pc missing (contract item 5, grub2-pc-modules)" >&2
+  exit 1
+fi
+for exe in mksquashfs xorriso implantisomd5 grub2-mkimage python3; do
+  command -v "$exe" >/dev/null 2>&1 || {
+    echo "error: $exe not found in PATH (contract item 7)" >&2
+    exit 1
+  }
+done
 
 # --- Size ------------------------------------------------------------------
 dnf5 clean all

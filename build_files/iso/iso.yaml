@@ -1,7 +1,16 @@
-# Container-native ISO contract v0.1.0 configuration (issue #77).
+# ISO configuration for the bootc-generic-iso artifact.
 #
-# The label is the ISO volume label and must stay in sync with the
-# root=live:CDLABEL= arguments below (32 characters max).
+# image-builder reads this file from /usr/lib/image-builder/bootc/iso.yaml
+# inside the container (build.sh installs it there). It is the same
+# "container-native ISO contract v0.1.0" that titanoboa implemented, so the
+# schema is unchanged: label, plus grub2 default/timeout/entries.
+#
+# label is the ISO volume label and must stay in sync with the
+# root=live:CDLABEL= arguments below. Contract limits: 32 characters max, no
+# spaces. Changing it changes the ISO's volume name, nothing else.
+#
+# enforcing=0 is load-bearing: the squashfs image-builder produces is not
+# SELinux-labelled, so the live root cannot be enforced.
 label: PixelBlue-Live
 grub2:
   default: 0
