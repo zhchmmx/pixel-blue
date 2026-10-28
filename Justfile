@@ -505,7 +505,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       --output-dir /output \
       --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
       --bootc-installer-payload-ref "${payload_image}" \
-      --bootc-default-fs ext4 \
+      --bootc-default-fs btrfs \
       --progress verbose \
       bootc-installer
 
