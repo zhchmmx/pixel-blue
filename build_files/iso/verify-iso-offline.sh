@@ -77,11 +77,17 @@ meta_paths="$(awk '$NF ~ /var\/lib\/containers\/storage\/(db\.sql|overlay-images
 }
 while read -r p; do
   [ -n "${p}" ] || continue
-  rel="${p#"${p%%var/*}"}"
-  unsquashfs -quiet -dest "${work}/meta" -force "${work}/live.img" "${rel}" >/dev/null 2>&1 || true
+  # Pass the listed path verbatim: it is already a valid in-archive path,
+  # whatever prefix (squashfs-root/, ostree/deploy/<os>/, ...) the storage
+  # directory happens to sit under.
+  unsquashfs -quiet -dest "${work}/meta" -force "${work}/live.img" "${p}" >/dev/null 2>&1 || true
 done <<< "${meta_paths}"
 if ! grep -a -r -F -- "${payload_ref}" "${work}/meta" >/dev/null; then
   echo "error: ${payload_ref} not found in the embedded container storage metadata" >&2
+  echo "diagnostic - matched storage metadata paths:" >&2
+  printf '%s\n' "${meta_paths}" | head -10 >&2
+  echo "diagnostic - total files under any containers/storage dir in the squashfs:" >&2
+  grep -c -E 'var/lib/containers/storage/' "${work}/listing" >&2 || true
   echo "diagnostic - ghcr/pixel-blue strings actually present:" >&2
   grep -a -h -r -o -i -E '[^"]*(ghcr|pixel-blue)[^"]*' "${work}/meta" 2>/dev/null | head -10 >&2
   exit 1
