@@ -206,6 +206,24 @@ jobs:
             --bootc-ref "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
             --bootc-installer-payload-ref "${BASE_IMAGE}" \
             generic-iso
+          # Debug: the ISO's squashfs store contains the payload's overlay
+          # layer dirs but no image records at all (no db.sql, no
+          # overlay-images/). Check whether the skopeo stage's
+          # containers-storage destination wrote the metadata into the
+          # RUNNER's host store instead of the tree, and what storage
+          # configuration the CLI container uses.
+          echo "::group::host container storage census"
+          sudo ls -la /var/lib/containers/storage/ | head -20
+          sudo ls /var/lib/containers/storage/overlay-images/ 2>/dev/null | head -5
+          sudo test -f /var/lib/containers/storage/db.sql && sudo grep -a -c "${BASE_IMAGE}" /var/lib/containers/storage/db.sql || echo "no db.sql on host"
+          sudo podman images --format '{{.Reference}}' | head -10
+          echo "::endgroup::"
+          echo "::group::image-builder container storage config"
+          sudo podman run --rm --pull=newer \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "${IMAGE_BUILDER_IMAGE}" \
+            bash -c 'cat /etc/containers/storage.conf 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20; echo ---; cat /usr/lib/containers/storage.conf 2>/dev/null | head -10; echo ---; rpm -q containers-common podman skopeo 2>/dev/null || true; cat /etc/os-release | head -3'
+          echo "::endgroup::"
           mapfile -t isos < <(find _ib_output -maxdepth 2 -name '*.iso')
           if [ "${#isos[@]}" -ne 1 ]; then
             echo "error: expected exactly one ISO, got: ${isos[*]:-none}" >&2
