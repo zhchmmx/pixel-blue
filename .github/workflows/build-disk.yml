@@ -180,7 +180,7 @@ jobs:
             --output-dir /output \
             --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
             --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
-            --bootc-default-fs ext4 \
+            --bootc-default-fs btrfs \
             --progress verbose \
             bootc-installer
 
