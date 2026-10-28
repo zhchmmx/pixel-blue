@@ -93,13 +93,28 @@ for rel in "${rel_paths[@]}"; do
 done
 if ! grep -a -r -F -- "${payload_ref}" "${work}/meta" >/dev/null; then
   echo "error: ${payload_ref} not found in the embedded container storage metadata" >&2
-  echo "diagnostic - metadata candidates in the listing: $(printf '%s\n' "${meta_paths}" | wc -l)" >&2
-  printf '%s\n' "${meta_paths}" | head -6 >&2
-  echo "diagnostic - files actually extracted into the meta dir:" >&2
+  echo "diagnostic - metadata candidates by kind:" >&2
+  printf 'db.sql*: %s | overlay-images: %s | overlay/*/link: %s | overlay/layers: %s | references: %s | overlay-layers: %s\n' \
+    "$(printf '%s\n' "${meta_paths}" | grep -c '/db\.sql')" \
+    "$(printf '%s\n' "${meta_paths}" | grep -c 'overlay-images/')" \
+    "$(printf '%s\n' "${meta_paths}" | grep -c '/overlay/[^/]*/link')" \
+    "$(printf '%s\n' "${meta_paths}" | grep -c '/overlay/layers/')" \
+    "$(printf '%s\n' "${meta_paths}" | grep -c '/references/')" \
+    "$(printf '%s\n' "${meta_paths}" | grep -c '/overlay-layers/')" >&2
+  echo "diagnostic - extracted meta files: $(find "${work}/meta" -type f 2>/dev/null | wc -l)" >&2
   find "${work}/meta" -type f 2>/dev/null | head -10 >&2
-  echo "diagnostic - total files under any containers/storage dir in the squashfs:" >&2
-  grep -c -E 'var/lib/containers/storage/' "${work}/listing" >&2 || true
-  echo "diagnostic - ghcr/pixel-blue strings actually present in extracted metadata:" >&2
+  for db in "${work}/meta"/var/lib/containers/storage/db.sql*; do
+    [ -e "${db}" ] || continue
+    echo "diagnostic - $(basename "${db}"): $(wc -c <"${db}") bytes, $(grep -a -c ghcr "${db}" || true) ghcr hits" >&2
+    echo "diagnostic - printable runs from $(basename "${db}"):" >&2
+    grep -a -o -E '[ -~]{20,}' "${db}" 2>/dev/null | head -25 >&2
+  done
+  imgl="${work}/meta/var/lib/containers/storage/overlay-images"
+  if [ -d "${imgl}" ]; then
+    echo "diagnostic - overlay-images link contents:" >&2
+    head -c 300 "${imgl}"/*/link 2>/dev/null | head -20 >&2
+  fi
+  echo "diagnostic - ghcr/pixel-blue strings in extracted metadata:" >&2
   grep -a -h -r -o -i -E '[^"]*(ghcr|pixel-blue)[^"]*' "${work}/meta" 2>/dev/null | head -10 >&2
   exit 1
 fi
