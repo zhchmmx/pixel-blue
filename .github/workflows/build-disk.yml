@@ -191,13 +191,19 @@ jobs:
           # falls back to a network pull (the Verify step below asserts
           # both on the finished ISO).
           sudo podman pull "${BASE_IMAGE}"
-          mkdir -p _ib_output
+          # Snapshot the runner's host container storage so we can diff it
+          # after the build: any paths that appear during the build are
+          # metadata the payload skopeo stage failed to write into the
+          # osbuild tree.
+          sudo find /var/lib/containers/storage -maxdepth 2 2>/dev/null | sort > /tmp/hoststore_before.txt || true
+          mkdir -p _ib_output _ib_store
           sudo podman run \
             --rm \
             --privileged \
             --pull=newer \
             --security-opt label=type:unconfined_t \
             -v "${PWD}/_ib_output:/output:z" \
+            -v "${PWD}/_ib_store:/var/cache/image-builder/store:z" \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             "${IMAGE_BUILDER_IMAGE}" \
             build \
@@ -206,24 +212,41 @@ jobs:
             --bootc-ref "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
             --bootc-installer-payload-ref "${BASE_IMAGE}" \
             generic-iso
-          # Debug: the ISO's squashfs store contains the payload's overlay
-          # layer dirs but no image records at all (no db.sql, no
-          # overlay-images/). Check whether the skopeo stage's
-          # containers-storage destination wrote the metadata into the
-          # RUNNER's host store instead of the tree, and what storage
-          # configuration the CLI container uses.
-          echo "::group::host container storage census"
-          sudo ls -la /var/lib/containers/storage/ | head -20
-          sudo ls /var/lib/containers/storage/overlay-images/ 2>/dev/null | head -5
-          sudo test -f /var/lib/containers/storage/db.sql && sudo grep -a -c "${BASE_IMAGE}" /var/lib/containers/storage/db.sql || echo "no db.sql on host"
-          sudo podman images --format '{{.Reference}}' | head -10
+          # Debug: the finished ISO's squashfs store contains the payload's
+          # overlay layer dirs but no image records (no overlay-images/,
+          # no db.sql). Two suspects remain: the skopeo stage's
+          # containers-storage destination wrote the records into the
+          # RUNNER's host store (differ below), or they never made it out
+          # of the stage sandbox. The osbuild object store, now kept in
+          # _ib_store, holds the raw os-tree pipeline tree: census it
+          # directly to see exactly what the stage committed.
+          echo "::group::osbuild store tree census"
+          sudo find _ib_store -type d -path '*tree/var/lib/containers/storage' | head -10 || true
+          for D in $(sudo find _ib_store -type d -path '*tree/var/lib/containers/storage' | head -5); do
+            echo "--- tree store: ${D}"
+            sudo ls -la "${D}" | head -30 || true
+            echo "overlay-images entries: $(sudo find "${D}/overlay-images" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+            sudo grep -r -l -F -- "${BASE_IMAGE}" "${D}/overlay-images" "${D}/overlay-layers" 2>/dev/null | head -5 || true
+            echo "overlay/layers files: $(sudo ls "${D}/overlay/layers" 2>/dev/null | wc -l)"
+            sudo find "${D}" -maxdepth 1 -name 'db.sql*' -exec ls -la '{}' ';' 2>/dev/null || true
+            echo "overlay dir count: $(sudo ls "${D}/overlay" 2>/dev/null | wc -l)"
+            sudo du -sh "${D}/overlay" 2>/dev/null || true
+          done
+          echo "::endgroup::"
+          echo "::group::host container storage diff"
+          sudo find /var/lib/containers/storage -maxdepth 2 2>/dev/null | sort > /tmp/hoststore_after.txt || true
+          echo "paths added to the host store during the build:"
+          comm -13 /tmp/hoststore_before.txt /tmp/hoststore_after.txt | head -40 || true
+          sudo ls -la /var/lib/containers/storage/ | head -20 || true
           echo "::endgroup::"
           echo "::group::image-builder container storage config"
           sudo podman run --rm --pull=newer \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             "${IMAGE_BUILDER_IMAGE}" \
-            bash -c 'cat /etc/containers/storage.conf 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20; echo ---; cat /usr/lib/containers/storage.conf 2>/dev/null | head -10; echo ---; rpm -q containers-common podman skopeo 2>/dev/null || true; cat /etc/os-release | head -3'
+            bash -c 'cat /etc/containers/storage.conf 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20; echo ---; cat /usr/lib/containers/storage.conf 2>/dev/null | head -10; echo ---; rpm -q containers-common podman skopeo osbuild 2>/dev/null || true; cat /etc/os-release | head -3' || true
           echo "::endgroup::"
+          # Free the (~tens of GB) object store now that the census is done.
+          sudo rm -rf _ib_store || true
           mapfile -t isos < <(find _ib_output -maxdepth 2 -name '*.iso')
           if [ "${#isos[@]}" -ne 1 ]; then
             echo "error: expected exactly one ISO, got: ${isos[*]:-none}" >&2
