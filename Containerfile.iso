@@ -1,7 +1,7 @@
-# Live ISO layer for ublue-os/titanoboa (issue #77).
+# Live ISO layer for osbuild image-builder (generic-iso).
 #
 # This image is a thin layer on top of the published Pixel Blue image and is
-# only used as the source rootfs for titanoboa's ISO build. It is never
+# only used as the source rootfs for the image-builder ISO build. It is never
 # pushed: the published image stays the single source of truth for the
 # installed system, and the ISO payload is that same published image pulled
 # into /var/lib/containers/storage.
@@ -16,7 +16,7 @@
 # flatpak inside the build to embed the installer payload and the Flatpak
 # preinstalls. The build output is a normal container image, not the ISO
 # itself; `just build-iso` (or the Build disk images workflow) hands it to
-# titanoboa.
+# image-builder.
 
 ARG BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest
 

@@ -18,11 +18,11 @@ Visit [Pixel Blue Download Page](https://pixel-blue.pages.dev/) to download the 
 
 ```bash
 just build          # build localhost/pixel-blue:latest
-just build-iso      # wraps it into build/pixel-blue.iso with ublue-os/titanoboa
+just build-iso      # assembles build/pixel-blue.iso with osbuild image-builder (generic-iso)
 just run-vm-iso     # boot the ISO in QEMU
 ```
 
-`just rebuild-iso` does the first two steps in one go. The titanoboa commit is pinned by `TITANOBOA_SHA` in `image-template.env` and must match the SHA in `.github/workflows/build-disk.yml`.
+`just rebuild-iso` does the first two steps in one go. The image-builder CLI image is pinned by `IMAGE_BUILDER_IMAGE` in `image-template.env`. `just build-iso` finishes with `build_files/iso/verify-iso-offline.sh`, which asserts the ISO really carries the offline payload and that the kickstart installs from the exact embedded reference (also run in CI).
 
 ## Option 2: Switch to Pixel Blue
 

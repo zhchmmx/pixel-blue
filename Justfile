@@ -8,7 +8,7 @@ export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export bib_image := env_var("BIB_IMAGE")
-export titanoboa_sha := env_var("TITANOBOA_SHA")
+export image_builder_image := env_var("IMAGE_BUILDER_IMAGE")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -440,22 +440,24 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build a live install ISO with ublue-os/titanoboa (issue #77)
+# Build a live install ISO with osbuild image-builder (generic-iso)
 #
 # The ISO boots a GNOME live session. Anaconda installs the container image
 # from a containers-storage copy embedded in the ISO (offline), copies the
-# Flatpak apps listed in flatpak_refs/ into the target and repoints the
-# installed deployment at the signed GHCR image. The live/installer
-# environment is a second image built from Containerfile.iso and is never
-# pushed.
+# Flatpak apps listed in flatpak_refs/ into the target and records the signed
+# GHCR reference as the installed deployment's origin (Anaconda bootc
+# kickstart command). The live/installer environment is a second image built
+# from Containerfile.iso and is never pushed; image-builder assembles the
+# ISO from it per the generic-iso container contract (kernel+initrd with
+# dmsquash-live, /boot/efi EFI tree, squashfs/xorriso/isomd5sum tools,
+# iso.yaml under /usr/lib/image-builder/bootc).
 #
 # $target_image/$tag select the image used for the live environment; build it
 # first (or use `just rebuild-iso`). $payload_image is the registry reference
 # embedded for the offline install AND recorded as the installed system's
 # origin, so it must stay pullable; it defaults to GHCR:$tag.
 #
-# Keep TITANOBOA_SHA in image-template.env in sync with the SHA pinned for
-# ublue-os/titanoboa in .github/workflows/build-disk.yml.
+# The CLI image is pinned by IMAGE_BUILDER_IMAGE in image-template.env.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -476,32 +478,44 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       --tag "localhost/{{ image_name }}-iso:{{ tag }}" \
       --file Containerfile.iso .
 
-    # titanoboa has no releases/tags; run main.sh from the pinned commit. It
-    # calls rootful podman itself (with build_iso.sh next to it), writes
-    # <iso-label>.iso into TITANOBOA_OUTPUT_DIR and prints that path on
-    # stdout.
-    titanoboa_dir="$(mktemp -d)"
-    trap 'rm -rf "${titanoboa_dir}"' EXIT
-    for file in main.sh build_iso.sh; do
-      curl --fail --location --retry 3 --silent --show-error \
-        "https://raw.githubusercontent.com/ublue-os/titanoboa/{{ titanoboa_sha }}/${file}" \
-        --output "${titanoboa_dir}/${file}"
-    done
-    chmod +x "${titanoboa_dir}/main.sh" "${titanoboa_dir}/build_iso.sh"
+    # image-builder resolves --bootc-ref from the calling user's container
+    # storage, so share root's store with the CLI (same pattern as the BIB
+    # call in _build-bib). The payload is already baked into the live layer,
+    # hence no --bootc-installer-payload-ref here.
+    ib_out="_ib_output"
+    rm -rf "${ib_out}"
+    mkdir -p "${ib_out}"
+    sudo podman run \
+      --rm \
+      --privileged \
+      --pull=newer \
+      --security-opt label=type:unconfined_t \
+      -v "${PWD}/${ib_out}:/output:z" \
+      -v /var/lib/containers/storage:/var/lib/containers/storage \
+      "${image_builder_image}" \
+      build \
+      --output-dir /output \
+      --bootc-default-fs btrfs \
+      --bootc-ref "{{ target_image }}:{{ tag }}" \
+      generic-iso
+
+    # The CLI writes a single <name>.iso under the output dir; refuse to
+    # promote anything else (a rerun must not pick up a stale ISO).
+    mapfile -t isos < <(find "${ib_out}" -maxdepth 2 -name '*.iso')
+    if [ "${#isos[@]}" -ne 1 ]; then
+        echo "error: expected exactly one ISO from image-builder, got: ${isos[*]:-none}" >&2
+        exit 1
+    fi
 
     mkdir -p build
-    # main.sh selects its result with a *.iso glob, so TITANOBOA_OUTPUT_DIR
-    # must hold exactly one ISO: use a fresh dir under build/ (same
-    # filesystem, so the rename below never copies) and move the output to
-    # its final name afterwards. Pointing it straight at build/ would make
-    # reruns pick up the stale pixel-blue.iso and abort on an mv onto itself.
-    iso_out="$(mktemp -d -p build)"
-    trap 'rm -rf "${titanoboa_dir}" "${iso_out}"' EXIT
-    iso_path="$(TITANOBOA_CTR_IMAGE="localhost/{{ image_name }}-iso:{{ tag }}" \
-      TITANOBOA_OUTPUT_DIR="${iso_out}" \
-      "${titanoboa_dir}/main.sh")"
-    sudo chown "$(id -u):$(id -g)" "${iso_path}"
-    mv -f "${iso_path}" build/pixel-blue.iso
+    sudo chown "$(id -u):$(id -g)" "${isos[0]}"
+    mv -f "${isos[0]}" build/pixel-blue.iso
+    rm -rf "${ib_out}"
+
+    # Fail fast when the finished ISO does not actually carry the offline
+    # payload: a --source-imgref/embedded-reference mismatch makes Anaconda
+    # silently fall back to a network pull.
+    sudo bash build_files/iso/verify-iso-offline.sh build/pixel-blue.iso "${payload_image}"
 
 # Rebuild the live ISO (rebuilds the container image first)
 [group('Build Virtal Machine Image')]

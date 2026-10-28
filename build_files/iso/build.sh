@@ -2,11 +2,11 @@
 # Build the Pixel Blue live-ISO layer (issue #77).
 #
 # Runs inside Containerfile.iso on top of the published Pixel Blue image. It
-# adds everything the Container-native ISO contract (v0.1.0) needs and the
+# adds everything the image-builder generic-iso container contract needs and the
 # live install experience: a GNOME live session, Anaconda, an offline copy of
 # the same image as the install payload, and the Flatpak preinstalls.
 #
-# This image is never pushed; titanoboa squashes it into the ISO.
+# This image is never pushed; image-builder assembles it into the ISO.
 
 set -euxo pipefail
 
@@ -61,19 +61,27 @@ podman image exists "$PAYLOAD_IMAGE" || {
 # anaconda-live pulls the Web UI and its storage plugins; firefox is the Web
 # UI web engine. dracut-live provides dmsquash-live for the live rootfs, the
 # grub packages provide the EFI binaries and BIOS modules required by the ISO
-# contract, and rsync/ostree are used by the kickstart post-scripts.
+# contract, rsync is used by the kickstart post-scripts and ostree backs the
+# installer's bootc deploy path.
+# squashfs-tools/xorriso/isomd5sum plus the existing grub2-pc-modules and
+# podman satisfy the image-builder generic-iso contract (mksquashfs, xorriso,
+# implantisomd5, grub2-mkimage): image-builder runs these from inside this
+# container when it assembles the ISO.
 dnf install -y \
   anaconda-live \
   dracut-live \
   firefox \
   grub2-efi-x64-cdboot \
   grub2-pc-modules \
+  isomd5sum \
   libblockdev-btrfs \
   libblockdev-dm \
   libblockdev-lvm \
   livesys-scripts \
   ostree \
-  rsync
+  rsync \
+  squashfs-tools \
+  xorriso
 
 # --- Live session ----------------------------------------------------------
 # livesys creates liveuser, enables GDM autologin and starts the session
@@ -153,11 +161,16 @@ done
 
 # --- Container-native ISO contract ----------------------------------------
 # UEFI binaries (shim/grub2) and the ISO label/menu. /boot/efi is not part of
-# the installed system; titanoboa only reads it to build the ISO's ESP.
+# the installed system; image-builder only reads it to build the ISO's ESP.
 mkdir -p /boot/efi
 cp -av /usr/lib/efi/*/*/EFI /boot/efi/
 cp -v /boot/efi/EFI/fedora/grubx64.efi /boot/efi/EFI/BOOT/fbx64.efi
 
+install -Dm644 "$SCRIPT_DIR/iso.yaml" \
+  /usr/lib/image-builder/bootc/iso.yaml
+# Legacy location still consulted by image-builder when the new directory is
+# absent, and by the container-native ISO contract v0.1.0 tooling
+# (titanoboa). Ship both during the builder transition.
 install -Dm644 "$SCRIPT_DIR/iso.yaml" \
   /usr/lib/bootc-image-builder/iso.yaml
 
@@ -188,61 +201,32 @@ systemd-firstboot --timezone UTC
 # --- Anaconda defaults -----------------------------------------------------
 # The destination-only Silverblue flow comes from the stock fedora-silverblue
 # profile: the main image preserves ID=fedora and VARIANT_ID=silverblue.
-# These post-scripts add the offline payload, the Flatpak preinstalls and the
-# registry origin rewrite.
+# These post-scripts add the Flatpak preinstalls and verify/seed the bootc
+# deployment origin.
 install -Dm644 "$SCRIPT_DIR/anaconda/install-flatpaks.ks" \
   /usr/share/anaconda/post-scripts/install-flatpaks.ks
+install -Dm644 "$SCRIPT_DIR/anaconda/install-bootc-origin.ks" \
+  /usr/share/anaconda/post-scripts/install-bootc-origin.ks
+sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
+  /usr/share/anaconda/post-scripts/install-bootc-origin.ks
 install -Dm644 "$SCRIPT_DIR/anaconda/restore-selinux-labels.ks" \
   /usr/share/anaconda/post-scripts/restore-selinux-labels.ks
-cat >/usr/share/anaconda/post-scripts/install-configure-upgrade.ks <<'EOF'
-%post --erroronfail --nochroot --interpreter=/usr/bin/bash
-set -euxo pipefail
-
-# Anaconda installs the payload from containers-storage (offline). Point the
-# installed deployment's origin at the signed registry reference so bootc
-# upgrade continues to work after the ISO is gone. This runs --nochroot, so
-# the physical install root (and its ostree repo) is at /mnt/sysimage.
-mapfile -t origins < <(find /mnt/sysimage/ostree/deploy -path '*/deploy/*.origin' -type f)
-if [ "${#origins[@]}" -eq 0 ]; then
-  echo "error: no bootc deployment origin found" >&2
-  exit 1
-fi
-for origin in "${origins[@]}"; do
-  if ! grep -q '^container-image-reference=' "$origin"; then
-    echo "error: $origin has no container-image-reference" >&2
-    exit 1
-  fi
-  sed -i \
-    's|^container-image-reference=.*|container-image-reference=ostree-image-signed:docker://@PAYLOAD_IMAGE@|' \
-    "$origin"
-  grep -q '^container-image-reference=ostree-image-signed:docker://@PAYLOAD_IMAGE@$' "$origin"
-
-  # The signed origin forces every bootc upgrade to verify the payload
-  # against the host's /etc/containers config. A payload image published
-  # before the matchRepository/registries.d change still carries the old
-  # config, which would fail that check forever. Seed the live layer's
-  # current files into the deployment: libostree initializes a deployment's
-  # /etc (the origin file's <rev>.<serial> directory) at deploy time, and
-  # keeps these local edits across upgrades until the image ships matching
-  # files itself.
-  deploy_dir="$(dirname "$origin")/$(basename "$origin" .origin)"
-  install -Dm644 /etc/containers/policy.json \
-    "${deploy_dir}/etc/containers/policy.json"
-  install -Dm644 /etc/containers/registries.d/pixel-blue.yaml \
-    "${deploy_dir}/etc/containers/registries.d/pixel-blue.yaml"
-done
-%end
-EOF
-sed -i "s|@PAYLOAD_IMAGE@|${PAYLOAD_IMAGE}|g" \
-  /usr/share/anaconda/post-scripts/install-configure-upgrade.ks
 
 cat >>/usr/share/anaconda/interactive-defaults.ks <<EOF
 
-# Pixel Blue live install (titanoboa, issue #77).
+# Pixel Blue live install (image-builder generic-iso).
 # The post-scripts in /usr/share/anaconda/post-scripts are auto-merged into
 # the kickstart by Anaconda (in name order, so restore-selinux-labels runs
 # last); %include-ing them here as well would execute every %post twice.
-ostreecontainer --url=${PAYLOAD_IMAGE} --transport=containers-storage --no-signature-verification
+#
+# The new Anaconda bootc command (rhinstaller/anaconda#6298) deploys the
+# payload embedded in the ISO from containers-storage AND records the signed
+# registry reference as the deployment origin itself (--target-imgref),
+# replacing the old ostreecontainer + post-hoc origin rewrite. The
+# --source-imgref tag must match the embedded reference exactly: Anaconda
+# otherwise ignores the offline copy and pulls from the network.
+# build_files/iso/verify-iso-offline.sh asserts both on the finished ISO.
+bootc --source-imgref containers-storage:${PAYLOAD_IMAGE} --target-imgref ${PAYLOAD_IMAGE}
 EOF
 
 # --- Size ------------------------------------------------------------------

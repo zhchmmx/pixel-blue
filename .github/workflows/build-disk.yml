@@ -30,6 +30,7 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}" # do not edit
   DEFAULT_TAG: "latest"
   BIB_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+  IMAGE_BUILDER_IMAGE: "ghcr.io/osbuild/image-builder-cli:latest"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -105,12 +106,13 @@ jobs:
           sudo apt-get install -y rclone
           rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
-  # Live install ISO, built with ublue-os/titanoboa (issue #77).
+  # Live install ISO, built with osbuild image-builder (generic-iso).
   # The ISO boots a GNOME live session; Anaconda installs the container image
   # from a containers-storage copy embedded in the ISO (offline), copies the
-  # Flatpak apps from flatpak_refs/ into the target and repoints the installed
-  # deployment at the signed GHCR image. The live/installer environment is a
-  # second image built from Containerfile.iso and is never pushed.
+  # Flatpak apps from flatpak_refs/ into the target and records the signed
+  # GHCR image as the installed deployment's origin. The live/installer
+  # environment is a second image built from Containerfile.iso and is never
+  # pushed.
   build-iso:
     name: Build live ISO
     runs-on: ubuntu-24.04
@@ -148,14 +150,52 @@ jobs:
             --tag "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
             --file Containerfile.iso .
 
-      - name: Build ISO with titanoboa
+      - name: Build ISO with image-builder
         id: build
-        uses: ublue-os/titanoboa@5c457c3d0518bd17e754be0fd98a60d29d26abb4 # main (2026-06-18)
-        with:
-          image-ref: localhost/${{ env.IMAGE_NAME }}-iso:${{ env.DEFAULT_TAG }}
-          # titanoboa resolves a relative iso-dest against its own action
-          # directory, so hand it an absolute path outside the workspace.
-          iso-dest: ${{ runner.temp }}/pixel-blue.iso
+        run: |
+          set -euxo pipefail
+          # The live layer baked the payload into its own container storage
+          # under this exact reference (PAYLOAD_IMAGE above); the kickstart
+          # must install from the identical reference or Anaconda falls back
+          # to a network pull.
+          BASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
+          # image-builder resolves --bootc-ref from the calling user's
+          # container storage, so share root's store with the CLI. The payload
+          # is already inside the live layer, hence no
+          # --bootc-installer-payload-ref here.
+          mkdir -p _ib_output
+          sudo podman run \
+            --rm \
+            --privileged \
+            --pull=newer \
+            --security-opt label=type:unconfined_t \
+            -v "${PWD}/_ib_output:/output:z" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "${IMAGE_BUILDER_IMAGE}" \
+            build \
+            --output-dir /output \
+            --bootc-default-fs btrfs \
+            --bootc-ref "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
+            generic-iso
+          mapfile -t isos < <(find _ib_output -maxdepth 2 -name '*.iso')
+          if [ "${#isos[@]}" -ne 1 ]; then
+            echo "error: expected exactly one ISO, got: ${isos[*]:-none}" >&2
+            exit 1
+          fi
+          # Hand the ISO to the checksum/upload steps outside the workspace.
+          mv -f "${isos[0]}" "${RUNNER_TEMP}/pixel-blue.iso"
+          sudo chown "$(id -u):$(id -g)" "${RUNNER_TEMP}/pixel-blue.iso"
+          rm -rf _ib_output
+          echo "iso-dest=${RUNNER_TEMP}/pixel-blue.iso" >> "$GITHUB_OUTPUT"
+          echo "payload-ref=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify offline payload
+        env:
+          ISO_PATH: ${{ steps.build.outputs.iso-dest }}
+          PAYLOAD_REF: ${{ steps.build.outputs.payload-ref }}
+        run: |
+          set -euxo pipefail
+          sudo ./build_files/iso/verify-iso-offline.sh "${ISO_PATH}" "${PAYLOAD_REF}"
 
       - name: Name and checksum ISO
         id: checksum
