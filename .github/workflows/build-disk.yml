@@ -195,7 +195,7 @@ jobs:
           PAYLOAD_REF: ${{ steps.build.outputs.payload-ref }}
         run: |
           set -euxo pipefail
-          sudo ./build_files/iso/verify-iso-offline.sh "${ISO_PATH}" "${PAYLOAD_REF}"
+          sudo bash ./build_files/iso/verify-iso-offline.sh "${ISO_PATH}" "${PAYLOAD_REF}"
 
       - name: Name and checksum ISO
         id: checksum
