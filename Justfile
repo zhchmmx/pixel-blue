@@ -467,9 +467,8 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # The ISO layer installs Flatpaks and pulls the payload into its own
-    # container storage, so the nested podman needs sys_admin and unconfined
-    # labels.
+    # The ISO layer installs Flatpaks, whose bwrap sandbox needs sys_admin
+    # and unconfined labels in the build container.
     sudo podman build \
       --cap-add sys_admin \
       --security-opt label=disable \
@@ -480,8 +479,13 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     # image-builder resolves --bootc-ref from the calling user's container
     # storage, so share root's store with the CLI (same pattern as the BIB
-    # call in _build-bib). The payload is already baked into the live layer,
-    # hence no --bootc-installer-payload-ref here.
+    # call in _build-bib). The offline payload is embedded natively via
+    # --bootc-installer-payload-ref, which copies the payload container
+    # from that same host storage into the ISO squashfs under the exact
+    # reference the kickstart installs from.
+    if ! sudo podman image exists "${payload_image}"; then
+        sudo podman pull "${payload_image}"
+    fi
     ib_out="_ib_output"
     rm -rf "${ib_out}"
     mkdir -p "${ib_out}"
@@ -497,6 +501,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       --output-dir /output \
       --bootc-default-fs btrfs \
       --bootc-ref "{{ target_image }}:{{ tag }}" \
+      --bootc-installer-payload-ref "${payload_image}" \
       generic-iso
 
     # The CLI writes a single <name>.iso under the output dir; refuse to

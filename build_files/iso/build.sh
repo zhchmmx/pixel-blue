@@ -39,23 +39,23 @@ if [ -z "$installed_flatpaks" ]; then
 fi
 
 # --- Installer payload -----------------------------------------------------
-# Anaconda installs from containers-storage, so the image the ISO installs
-# must be present inside the live rootfs. Pull the same published image the
-# ISO layer is built from; it is never the ISO layer itself.
+# The offline payload is embedded by image-builder itself: the build
+# circuits pass --bootc-installer-payload-ref (see Justfile build-iso and
+# .github/workflows/build-disk.yml), which copies the payload container
+# from the host's container storage into the ISO's
+# /var/lib/containers/storage under the very reference the kickstart
+# installs from. A podman pull inside this layer does NOT work:
+# image-builder's container-to-squashfs conversion strips the nested
+# store's image metadata (observed in CI: layer dirs survive, db.sql and
+# overlay-images records do not), which silently breaks offline installs.
+# $PAYLOAD_IMAGE remains required below for the kickstart references.
 #
-# The pull must verify the payload's cosign signature. The published base
-# image may still carry an older (or no) containers configuration, so install
-# the repo's current one first: registries.d enables reading the cosign .sig
-# tags and the policy accepts cosign's repo-level signature identity for a
-# tagged pull.
+# The repo's current signature policy and registries.d still land in the
+# live rootfs: install-bootc-origin.ks seeds them into each deployment so
+# bootc updates on the installed system can verify cosign signatures.
 install -Dm644 /ctx/containers/policy.json /etc/containers/policy.json
 install -Dm644 /ctx/containers/registries.d/pixel-blue.yaml \
   /etc/containers/registries.d/pixel-blue.yaml
-podman pull "$PAYLOAD_IMAGE"
-podman image exists "$PAYLOAD_IMAGE" || {
-  echo "error: payload image $PAYLOAD_IMAGE is missing from container storage" >&2
-  exit 1
-}
 
 # --- Live/installer packages ----------------------------------------------
 # anaconda-live pulls the Web UI and its storage plugins; firefox is the Web

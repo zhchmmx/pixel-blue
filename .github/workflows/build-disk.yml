@@ -154,15 +154,16 @@ jobs:
         id: build
         run: |
           set -euxo pipefail
-          # The live layer baked the payload into its own container storage
-          # under this exact reference (PAYLOAD_IMAGE above); the kickstart
-          # must install from the identical reference or Anaconda falls back
-          # to a network pull.
           BASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
           # image-builder resolves --bootc-ref from the calling user's
-          # container storage, so share root's store with the CLI. The payload
-          # is already inside the live layer, hence no
-          # --bootc-installer-payload-ref here.
+          # container storage, so share root's store with the CLI. The
+          # offline payload is embedded natively with
+          # --bootc-installer-payload-ref, which copies that reference from
+          # the same host storage into the ISO squashfs; the kickstart's
+          # --source-imgref must equal it exactly or Anaconda silently
+          # falls back to a network pull (the Verify step below asserts
+          # both on the finished ISO).
+          sudo podman pull "${BASE_IMAGE}"
           mkdir -p _ib_output
           sudo podman run \
             --rm \
@@ -176,6 +177,7 @@ jobs:
             --output-dir /output \
             --bootc-default-fs btrfs \
             --bootc-ref "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
+            --bootc-installer-payload-ref "${BASE_IMAGE}" \
             generic-iso
           mapfile -t isos < <(find _ib_output -maxdepth 2 -name '*.iso')
           if [ "${#isos[@]}" -ne 1 ]; then
