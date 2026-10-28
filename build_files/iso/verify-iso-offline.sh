@@ -66,29 +66,40 @@ grep -F -- "bootc --source-imgref containers-storage:${payload_ref} --target-img
 
 # 2. The payload must be in the embedded container storage. Where the tagged
 #    reference string lands is a containers-storage implementation detail
-#    (db.sql sqlite pages, plus per-image link/image.json metadata), so grep
-#    the whole small-metadata set: db.sql, overlay-images/*/image.json and
-#    overlay/*/link. Layer data lives under overlay-layers/ and is not
-#    searched.
-meta_paths="$(awk '$NF ~ /var\/lib\/containers\/storage\/(db\.sql|overlay-images\/[^/]+\/image\.json|overlay\/[^/]+\/link)$/ { print $NF }' "${work}/listing")"
+#    (db.sql sqlite pages plus per-image and per-layer link/image.json
+#    metadata), so grep the whole small-metadata set: db.sql(.bak),
+#    overlay-images/*/*, overlay/*/link, overlay/layers/*, references/*.
+#    Layer tarballs under overlay-layers/ are not searched.
+meta_paths="$(awk '$NF ~ /var\/lib\/containers\/storage\/(db\.sql[^/]*|overlay\/[^/]+\/link|overlay\/layers\/[^/]+|overlay-images\/[^/]+\/(link|image\.json)|overlay-layers\/[^/]+\/link|references\/.*)$/ { print $NF }' "${work}/listing")"
 [ -n "${meta_paths}" ] || {
   echo "error: no containers-storage metadata inside the ISO squashfs" >&2
   exit 1
 }
+# unsquashfs resolves path arguments relative to the single top-level
+# directory stored in the archive (here "squashfs-root"); passing the
+# listed path verbatim silently extracts NOTHING (exit 0, empty dest).
+# Strip that first component, but keep already-bare paths intact.
+rel_paths=()
 while read -r p; do
   [ -n "${p}" ] || continue
-  # Pass the listed path verbatim: it is already a valid in-archive path,
-  # whatever prefix (squashfs-root/, ostree/deploy/<os>/, ...) the storage
-  # directory happens to sit under.
-  unsquashfs -quiet -dest "${work}/meta" -force "${work}/live.img" "${p}" >/dev/null 2>&1 || true
+  if [[ "${p}" == var/* ]]; then
+    rel_paths+=("${p}")
+  else
+    rel_paths+=("${p#*/}")
+  fi
 done <<< "${meta_paths}"
+for rel in "${rel_paths[@]}"; do
+  unsquashfs -quiet -dest "${work}/meta" -force "${work}/live.img" "${rel}" >/dev/null 2>&1 || true
+done
 if ! grep -a -r -F -- "${payload_ref}" "${work}/meta" >/dev/null; then
   echo "error: ${payload_ref} not found in the embedded container storage metadata" >&2
-  echo "diagnostic - matched storage metadata paths:" >&2
-  printf '%s\n' "${meta_paths}" | head -10 >&2
+  echo "diagnostic - metadata candidates in the listing: $(printf '%s\n' "${meta_paths}" | wc -l)" >&2
+  printf '%s\n' "${meta_paths}" | head -6 >&2
+  echo "diagnostic - files actually extracted into the meta dir:" >&2
+  find "${work}/meta" -type f 2>/dev/null | head -10 >&2
   echo "diagnostic - total files under any containers/storage dir in the squashfs:" >&2
   grep -c -E 'var/lib/containers/storage/' "${work}/listing" >&2 || true
-  echo "diagnostic - ghcr/pixel-blue strings actually present:" >&2
+  echo "diagnostic - ghcr/pixel-blue strings actually present in extracted metadata:" >&2
   grep -a -h -r -o -i -E '[^"]*(ghcr|pixel-blue)[^"]*' "${work}/meta" 2>/dev/null | head -10 >&2
   exit 1
 fi
