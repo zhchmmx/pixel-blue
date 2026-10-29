@@ -469,12 +469,13 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # Installer environment: the payload plus Anaconda and /flatpak/repo.
-    # Flatpak runs inside this build (bwrap needs sys_admin), hence the caps.
+    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
+    # fedora-bootc base (see Containerfile.installer). The payload image is
+    # passed separately to image-builder below. Flatpak runs inside this build
+    # (bwrap needs sys_admin), hence the caps.
     sudo podman build \
       --cap-add sys_admin \
       --security-opt label=disable \
-      --build-arg BASE_IMAGE="{{ target_image }}:{{ tag }}" \
       --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
       --file Containerfile.installer .
 
