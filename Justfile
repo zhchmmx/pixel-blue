@@ -442,32 +442,17 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 
 # Build the install ISO with osbuild image-builder (bootc-generic-iso)
 #
-# The ISO boots Anaconda. It installs the published Pixel Blue image from a
-# containers-storage copy embedded in the ISO, and installs the Flatpaks listed
-# in flatpak_refs/ out of the local ostree repo baked into the installer image
-# -- both before the first boot and both without any network access. There is
-# no live desktop: this is an installer, not a live session.
+# The ISO boots Anaconda with the Web UI; the user picks the disk and keeps the
+# Automatic layout. It installs the published Pixel Blue image from a container
+# copy embedded in the ISO, plus the Flatpaks in flatpak_refs/ out of the local
+# ostree repo baked into the installer image -- both offline, both before the
+# first boot. There is no live desktop: this is an installer.
 #
-# $target_image/$tag select the payload image; $payload_image is the registry
-# reference embedded for the offline install AND recorded as the installed
-# system's origin, so it must stay pullable; it defaults to GHCR:$tag. It is
-# also passed to the installer image as PAYLOAD_REF, because it is baked into
-# interactive-defaults.ks (the kickstart Anaconda reads instead of inst.ks).
-#
-# image-builder never talks to a registry: it copies the payload out of the
-# host's rootful container storage, so the payload is pulled here first, with
-# this repo's cosign policy installed, so the pull is verified exactly like a
-# real client would verify it.
-#
-# Why bootc-generic-iso and not the older bootc-installer type: the latter
-# hardcodes `inst.text` plus `inst.ks=hd:LABEL=...` in its kernel command line
-# (pkg/image/anaconda_container_installer.go), which forces the TUI installer
-# and an unattended install, and there is no configuration knob to change it.
-# With bootc-generic-iso the command line comes from our own
-# build_files/installer/iso.yaml (`inst.graphical`), and storage is left
-# unconfigured on purpose so Anaconda shows the Installation Destination page
-# and the user picks the disk -- the same path a Fedora Silverblue install
-# takes. Nothing here passes inst.ks.
+# $target_image/$tag select the payload image; $payload_image is the published
+# reference, which is what the installed system follows for updates and what
+# interactive-defaults.ks records as the target. The payload is copied to a
+# local reference first because image-builder reads it out of host storage and
+# refuses images that still carry signature attachments.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -520,8 +505,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
     trap 'rm -rf "${iso_out}"' EXIT
     mkdir -p build
     # Fedora bootc containers do not declare a root filesystem and
-    # image-builder refuses to guess one, so pass the same ext4 default
-    # bootc-image-builder uses for the qcow2/raw images.
+    # image-builder refuses to guess one, so name it explicitly.
     sudo podman run --rm \
       --privileged \
       --pull=newer \

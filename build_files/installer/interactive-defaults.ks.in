@@ -1,42 +1,23 @@
-# Defaults for an *interactive* Anaconda run.
+# Defaults for an interactive Anaconda run.
 #
-# Anaconda reads this file only when no kickstart is passed on the command
-# line (no inst.ks=). Unlike a real kickstart it does not set the automated
-# install flag, so the installer still stops and asks about anything left
-# unconfigured -- the disk, in our case.
+# Anaconda reads this only when the kernel command line carries no inst.ks=.
+# It is a kickstart, but without the automated flags, so the installer still
+# stops and asks for anything left unconfigured -- the disk, in our case.
 #
-# @PAYLOAD_SRC@ and @PAYLOAD_TARGET@ are substituted by Containerfile.installer
-# from build arguments. They are deliberately separate:
+# @PAYLOAD_SRC@ / @PAYLOAD_TARGET@ are substituted by Containerfile.installer:
 #
-#   source -- what bootc copies from, looked up in the installer environment's
-#             own container storage, so it must carry the containers-storage:
-#             transport AND match the name image-builder used when it embedded
-#             the payload (--bootc-installer-payload-ref).
-#   target -- what the installed system tracks for updates: the published
-#             registry reference, with no transport prefix (pykickstart rejects
-#             one).
+#   source -- what bootc copies from. A name in the installer's own container
+#             storage, so it needs the containers-storage: transport and must
+#             match --bootc-installer-payload-ref exactly.
+#   target -- what the installed system tracks for updates. A registry
+#             reference; pykickstart rejects a transport prefix here.
 #
-# Keeping them separate is what lets build-disk.yml re-tag the payload locally
-# (to shed the signature attachments that image-builder's copy cannot handle)
-# without changing where the installed system gets its updates from.
+# `xconfig --startxonboot` pins graphical.target. Left alone, Anaconda only
+# picks graphical when it can prove the target has a graphical login manager
+# and falls back to multi-user.target otherwise, i.e. a console-only system.
 #
-# Why these two directives are needed:
-#
-# 1. Payload. There is no inst.ks= telling Anaconda what to install, so the
-#    bootc container has to be named here.
-#
-# 2. Desktop. With no explicit target Anaconda guesses: it looks for a package
-#    providing service(graphical-login) in the target and falls back to
-#    multi-user.target when it cannot prove one exists -- which boots the
-#    installed system to a console. `xconfig --startxonboot` pins
-#    graphical.target regardless. (Same workaround as bootc-image-builder
-#    issue #918, on a Silverblue-derived payload.)
-#
-# Deliberately absent: every storage directive. No clearpart, no autopart, no
-# zerombr. Leaving storage untouched is what makes Anaconda show the
-# Installation Destination page (pick the disk, keep Automatic, Done) instead
-# of silently wiping the first disk the way the kickstart-driven
-# bootc-installer build did.
+# No storage directives on purpose: that is what makes Anaconda show the
+# Installation Destination page and let the user pick the disk.
 bootc --source-imgref containers-storage:@PAYLOAD_SRC@ --target-imgref @PAYLOAD_TARGET@
 
 xconfig --startxonboot

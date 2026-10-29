@@ -151,9 +151,7 @@ jobs:
         run: |
           set -euxo pipefail
           # Flatpak runs inside this build, so bwrap needs sys_admin and
-          # unconfined labels. The payload references are baked into
-          # interactive-defaults.ks, so they must match what
-          # --bootc-installer-payload-ref and the pull step produced.
+          # unconfined labels.
           sudo podman build \
             --cap-add sys_admin \
             --security-opt label=disable \
@@ -162,18 +160,18 @@ jobs:
             --tag "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
             --file Containerfile.installer .
 
-      # Informational, not a gate: it prints what the installer image actually
-      # contains, so a UI that fails to come up in a VM can be diagnosed from
-      # the job log instead of a second 30-minute build. The local display path
-      # for the Web UI is the fragile part -- it needs a browser/WebView plus
-      # something to open it on, and nothing here proves that chain works.
+      # Informational, not a gate: what the installer image actually contains,
+      # so a UI that never appears can be diagnosed from the log instead of
+      # another 30-minute build.
       - name: Inspect installer UI plumbing
         run: |
           set -uo pipefail
           img="localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}"
           script='
+            echo "--- base release ---"
+            rpm -q fedora-release --qf "%{VERSION}\n" 2>&1 || true
             echo "--- UI packages ---"
-            rpm -q anaconda-webui anaconda-gui slitherer webkit2gtk4.1 firefox cockpit-ws 2>&1 || true
+            rpm -q anaconda-install-img-deps anaconda-webui slitherer firefox gnome-kiosk cockpit-ws 2>&1 || true
             echo "--- launcher ---"
             ls -l /usr/libexec/anaconda/webui-desktop 2>&1 || true
             echo "--- default browser command ---"
@@ -274,10 +272,9 @@ jobs:
           fi
           echo "iso-path=${iso}" >> "$GITHUB_OUTPUT"
 
-      # The whole point of moving off the bootc-installer type is the kernel
-      # command line, and that is cheap to check straight out of the ISO. A
-      # silent regression here means shipping a TUI installer again, so fail
-      # the build rather than the user.
+      # The kernel command line decides whether this is a graphical, interactive
+      # installer at all, and it is cheap to read back out of the ISO. A silent
+      # regression here means shipping a TUI installer, so fail the build.
       - name: Verify installer mode from grub.cfg
         env:
           ISO_PATH: ${{ steps.build.outputs.iso-path }}
