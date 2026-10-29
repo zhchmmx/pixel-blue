@@ -124,9 +124,20 @@ RUN printf 'u install 0:0 "Anaconda Installer" /root /usr/libexec/anaconda/run-a
  && systemd-sysusers anaconda.conf \
  && passwd -d root
 
-# A VT with a pre-logged-in session -- this is what replaces getty and puts the
-# installer on screen. No preset ships it, the image has to enable it.
-RUN systemctl enable anaconda-shell@tty1.service
+# Take the auto-activated VTs away from getty.
+#
+# logind spawns autovt@ttyN for every VT it activates, and in the base image
+# autovt@ points at getty@. Anaconda then starts its Wayland session
+# (gnome-kiosk) on one of those VTs, which is already held by an agetty:
+# the compositor is killed by SIGHUP before it can draw anything, Anaconda
+# reports "Wayland startup failed ... exited on signal 1" and falls back to a
+# TUI that has no terminal to render on, leaving a black screen.
+#
+# Pointing autovt at anaconda-shell@ instead gives each VT a pre-logged-in
+# shell that yields to whatever takes the VT over, which is what the reference
+# installer images do.
+RUN rm -f /usr/lib/systemd/system/autovt@.service \
+ && ln -s /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service
 
 # Anaconda owns the machine while it runs.
 RUN ln -sf /usr/lib/systemd/system/anaconda.target /etc/systemd/system/default.target \
