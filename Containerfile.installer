@@ -42,8 +42,11 @@ ARG PAYLOAD_TARGET_REF
 # image. It brings anaconda-core, gnome-kiosk, the anaconda-shell@ unit, the
 # logind ReserveVT drop-in and mesa-dri-drivers -- Anaconda draws its UI inside
 # that kiosk session, so without this package there is a backend and a blank
-# screen. anaconda-webui is the frontend and slitherer the browser it renders
-# in; firefox is the fallback the launcher knows about.
+# screen.
+#
+# anaconda is the metapackage: it resolves anaconda-gui or anaconda-webui from
+# the base image's release identity (gui for server/basic/iot, webui
+# otherwise). build-disk.yml asserts the webui half never gets pulled in.
 #
 # xorriso/isomd5sum/grub2-tools/jq are bootc-generic-iso's own requirements
 # (xorrisofs, implantisomd5, grub2-mkimage, and the kernel-install JSON parsing
@@ -51,9 +54,7 @@ ARG PAYLOAD_TARGET_REF
 # needs to draw anything on real hardware.
 RUN dnf install -y \
       anaconda-install-img-deps \
-      anaconda-webui \
-      slitherer \
-      firefox \
+      anaconda \
       anaconda-dracut \
       dracut-config-generic \
       dracut-network \
