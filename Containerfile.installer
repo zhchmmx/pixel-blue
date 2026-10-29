@@ -21,13 +21,20 @@
 #
 # Build with:
 #   sudo podman build --cap-add sys_admin --security-opt label=disable \
-#     --build-arg BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest \
 #     --tag localhost/pixel-blue-installer:latest --file Containerfile.installer .
 #
 # The extra capabilities are for the Flatpak install inside the build (bwrap
 # wants a writable /proc/sys).
+#
+# Why fedora-bootc:44 and not the full Pixel Blue image:
+# The installer container only needs Anaconda + boot tooling + /flatpak/repo.
+# Building it FROM the full system image dragged the entire GNOME desktop into
+# INSTALL.IMG (~4 GB), even though there is no live session. The payload
+# (pixel-blue:latest) is embedded separately via --bootc-installer-payload-ref,
+# so the installer rootfs does not need to contain the desktop at all.
+# This mirrors ondrejbudai/bootc-isos' fedora-payload example.
 
-ARG BASE_IMAGE=ghcr.io/zhchmmx/pixel-blue:latest
+ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:44
 
 FROM ${BASE_IMAGE}
 
