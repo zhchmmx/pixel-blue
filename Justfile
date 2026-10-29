@@ -8,7 +8,7 @@ export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export bib_image := env_var("BIB_IMAGE")
-export titanoboa_sha := env_var("TITANOBOA_SHA")
+export image_builder_image := env_var("IMAGE_BUILDER_IMAGE")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -440,22 +440,26 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build a live install ISO with ublue-os/titanoboa (issue #77)
+# Build the install ISO with osbuild image-builder (bootc-installer)
 #
-# The ISO boots a GNOME live session. Anaconda installs the container image
-# from a containers-storage copy embedded in the ISO (offline), copies the
-# Flatpak apps listed in flatpak_refs/ into the target and repoints the
-# installed deployment at the signed GHCR image. The live/installer
-# environment is a second image built from Containerfile.iso and is never
-# pushed.
+# The ISO boots Anaconda. It installs the published Pixel Blue image from a
+# containers-storage copy embedded in the ISO, and installs the Flatpaks listed
+# in flatpak_refs/ out of the local ostree repo baked into the installer image
+# -- both before the first boot and both without any network access. There is
+# no live desktop: this is an installer, not a live session.
 #
-# $target_image/$tag select the image used for the live environment; build it
-# first (or use `just rebuild-iso`). $payload_image is the registry reference
-# embedded for the offline install AND recorded as the installed system's
-# origin, so it must stay pullable; it defaults to GHCR:$tag.
+# $target_image/$tag select the payload image; $payload_image is the registry
+# reference embedded for the offline install AND recorded as the installed
+# system's origin, so it must stay pullable; it defaults to GHCR:$tag.
 #
-# Keep TITANOBOA_SHA in image-template.env in sync with the SHA pinned for
-# ublue-os/titanoboa in .github/workflows/build-disk.yml.
+# image-builder never talks to a registry: it copies the payload out of the
+# host's rootful container storage, so the payload is pulled here first, with
+# this repo's cosign policy installed, so the pull is verified exactly like a
+# real client would verify it.
+#
+# The install itself is interactive (no kickstart is passed), so the user picks
+# the target disk in Anaconda. Add --config <file.toml> here to make it
+# unattended.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -465,41 +469,53 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # The ISO layer installs Flatpaks and pulls the payload into its own
-    # container storage, so the nested podman needs sys_admin and unconfined
-    # labels.
+    # Installer environment: the payload plus Anaconda and /flatpak/repo.
+    # Flatpak runs inside this build (bwrap needs sys_admin), hence the caps.
     sudo podman build \
       --cap-add sys_admin \
       --security-opt label=disable \
       --build-arg BASE_IMAGE="{{ target_image }}:{{ tag }}" \
-      --build-arg PAYLOAD_IMAGE="${payload_image}" \
-      --tag "localhost/{{ image_name }}-iso:{{ tag }}" \
-      --file Containerfile.iso .
+      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
+      --file Containerfile.installer .
 
-    # titanoboa has no releases/tags; run main.sh from the pinned commit. It
-    # calls rootful podman itself (with build_iso.sh next to it), writes
-    # <iso-label>.iso into TITANOBOA_OUTPUT_DIR and prints that path on
-    # stdout.
-    titanoboa_dir="$(mktemp -d)"
-    trap 'rm -rf "${titanoboa_dir}"' EXIT
-    for file in main.sh build_iso.sh; do
-      curl --fail --location --retry 3 --silent --show-error \
-        "https://raw.githubusercontent.com/ublue-os/titanoboa/{{ titanoboa_sha }}/${file}" \
-        --output "${titanoboa_dir}/${file}"
-    done
-    chmod +x "${titanoboa_dir}/main.sh" "${titanoboa_dir}/build_iso.sh"
+    # Install this repo's containers policy on the host first, so the pull
+    # below enforces the cosign signature instead of trusting anything.
+    sudo install -Dm644 system_files/etc/containers/policy.json \
+      /etc/containers/policy.json
+    sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml \
+      /etc/containers/registries.d/pixel-blue.yaml
+    sudo podman pull "${payload_image}"
 
+    # image-builder writes into --output-dir; use a scratch dir so a rerun can
+    # never pick up a stale ISO.
+    iso_out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
+    trap 'rm -rf "${iso_out}"' EXIT
     mkdir -p build
-    # main.sh selects its result with a *.iso glob, so TITANOBOA_OUTPUT_DIR
-    # must hold exactly one ISO: use a fresh dir under build/ (same
-    # filesystem, so the rename below never copies) and move the output to
-    # its final name afterwards. Pointing it straight at build/ would make
-    # reruns pick up the stale pixel-blue.iso and abort on an mv onto itself.
-    iso_out="$(mktemp -d -p build)"
-    trap 'rm -rf "${titanoboa_dir}" "${iso_out}"' EXIT
-    iso_path="$(TITANOBOA_CTR_IMAGE="localhost/{{ image_name }}-iso:{{ tag }}" \
-      TITANOBOA_OUTPUT_DIR="${iso_out}" \
-      "${titanoboa_dir}/main.sh")"
+    # Fedora bootc containers do not declare a root filesystem and
+    # image-builder refuses to guess one, so pass the same ext4 default
+    # bootc-image-builder uses for the qcow2/raw images.
+    sudo podman run --rm \
+      --privileged \
+      --pull=newer \
+      --security-opt label=type:unconfined_t \
+      -v "${iso_out}":/output \
+      -v /var/lib/containers/storage:/var/lib/containers/storage \
+      "{{ image_builder_image }}" \
+      build \
+      --output-dir /output \
+      --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
+      --bootc-installer-payload-ref "${payload_image}" \
+      --bootc-default-fs btrfs \
+      --progress verbose \
+      bootc-installer
+
+    # The layout under --output-dir is image-builder's business (it nests by
+    # name/type/arch), so find the ISO instead of guessing a path.
+    iso_path="$(find "${iso_out}" -type f -name '*.iso' | head -n1)"
+    if [ -z "${iso_path}" ]; then
+      echo "error: image-builder produced no ISO under ${iso_out}" >&2
+      exit 1
+    fi
     sudo chown "$(id -u):$(id -g)" "${iso_path}"
     mv -f "${iso_path}" build/pixel-blue.iso
 
