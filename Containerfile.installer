@@ -71,13 +71,19 @@ ARG PAYLOAD_TARGET_REF
 # Anaconda plus the packages bootc-generic-iso expects to find in the installer
 # container (see the ISOs page of the image-builder docs). Notes on the ones
 # that are not obvious:
-#   - the UI is the Anaconda Web UI (anaconda-webui), not the GTK one. The
-#     `anaconda` metapackage would drag in anaconda-gui instead; Anaconda picks
-#     the Web UI when anaconda-webui is installed, which is what Fedora 45
-#     Atomic images do. firefox is the local renderer and gnome-kiosk is the
-#     kiosk session it runs in -- anaconda-webui does not depend on either,
-#     because on live ISOs the live desktop provides them. Reverting this
-#     commit goes back to the GTK installer.
+#   - the UI is the Anaconda Web UI (anaconda-webui), not the GTK one. Anaconda
+#     runs the Web UI whenever anaconda-webui is installed, which is what
+#     Fedora's own image-based installers do (see the anaconda.spec rich
+#     dependency: anaconda-gui on server/basic/iot identities, anaconda-webui
+#     everywhere else). Reverting this commit goes back to the GTK installer.
+#   - anaconda-install-img-deps is the piece that makes the Web UI appear at
+#     all. It is the "installing *from* an image" dependency set (as opposed to
+#     install-env-deps, which is for live media) and it is what pulls in
+#     gnome-kiosk, anaconda-shell@.service, the logind ReserveVT drop-in and
+#     mesa-dri-drivers. Anaconda starts a gnome-kiosk session on the VT and
+#     runs the UI inside it, so without this package there is a backend but
+#     nothing on screen. The browser itself is slitherer (the default the
+#     webui-desktop script picks on Fedora) with firefox as the fallback.
 #   - xorriso/isomd5sum/grub2-tools/jq are build-time requirements of
 #     bootc-generic-iso (xorrisofs, implantisomd5, grub2-mkimage, and the
 #     kernel-install JSON parsing used by the dracut step).
@@ -88,6 +94,7 @@ ARG PAYLOAD_TARGET_REF
 RUN dnf install -y \
       anaconda-core \
       anaconda-webui \
+      anaconda-install-img-deps \
       firefox \
       gnome-kiosk \
       anaconda-install-env-deps \
@@ -115,6 +122,14 @@ RUN dnf install -y \
       intel-gpu-firmware \
       mesa-dri-drivers \
  && dnf clean all
+
+# The Web UI's local renderer. Fedora's webui-desktop script defaults to
+# slitherer (a minimal browser shipped for installers) and falls back to
+# firefox, which is installed above. Tolerate slitherer being absent on this
+# base: the "Inspect installer UI plumbing" step in build-disk.yml reports
+# which browser the image actually resolves to.
+RUN dnf install -y slitherer \
+ || echo "note: slitherer not available on this base; firefox remains the renderer"
 
 # lorax wants to create a symlink in /mnt pointing at /var/mnt, which bootc
 # images do not ship.
