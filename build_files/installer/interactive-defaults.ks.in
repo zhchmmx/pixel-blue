@@ -1,0 +1,35 @@
+# Defaults for an *interactive* Anaconda run.
+#
+# Anaconda reads this file only when no kickstart is passed on the command
+# line (no inst.ks=). Unlike a real kickstart it does not set the automated
+# install flag, so the installer still stops and asks about anything left
+# unconfigured -- the disk, in our case.
+#
+# @PAYLOAD_REF@ is substituted by Containerfile.installer from the PAYLOAD_REF
+# build argument, so the reference always matches what --bootc-installer-payload-ref
+# embedded in the ISO.
+#
+# Why these two lines are needed:
+#
+# 1. Payload. There is no inst.ks= telling Anaconda what to install, so the
+#    bootc container has to be named here. The ISO carries a copy of it in its
+#    container storage (--bootc-installer-payload-ref), hence the
+#    containers-storage: transport. --target-imgref must NOT carry a transport
+#    prefix (pykickstart rejects one); it is the reference the installed system
+#    tracks for future updates.
+#
+# 2. Desktop. With no explicit target Anaconda guesses: it looks for a package
+#    providing service(graphical-login) in the target and falls back to
+#    multi-user.target when it cannot prove one exists -- which boots the
+#    installed system to a console. `xconfig --startxonboot` pins
+#    graphical.target regardless. (Same workaround as bootc-image-builder
+#    issue #918, on a Silverblue-derived payload.)
+#
+# Deliberately absent: every storage directive. No clearpart, no autopart, no
+# zerombr. Leaving storage untouched is what makes Anaconda show the
+# Installation Destination page (pick the disk, keep Automatic, Done) instead
+# of silently wiping the first disk the way the kickstart-driven
+# bootc-installer build did.
+bootc --source-imgref containers-storage:@PAYLOAD_REF@ --target-imgref @PAYLOAD_REF@
+
+xconfig --startxonboot

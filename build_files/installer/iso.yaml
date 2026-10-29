@@ -1,0 +1,31 @@
+# GRUB menu and kernel command line for the installer ISO.
+#
+# image-builder only reads this file for the `bootc-generic-iso` type. The
+# legacy `bootc-installer` type ignored it and instead hardcoded its own
+# command line (pkg/image/anaconda_container_installer.go):
+#
+#     "console=tty0",
+#     // XXX: we want the graphical installer eventually, just
+#     // need to figure out the dependencies
+#     "inst.text",
+#
+# which is why the installer used to come up as a TUI and installed
+# unattended. With this file the command line is ours.
+#
+# Two rules that are easy to get wrong:
+#
+#   * `console=` on its own implies `inst.text`, so a graphical install needs
+#     `inst.graphical` spelled out next to it.
+#   * `inst.stage2=hd:LABEL=` must match `label:` byte for byte, and the label
+#     must stay within the 32-character limit.
+#
+# No `inst.ks=`: without it Anaconda runs interactively and picks up
+# /usr/share/anaconda/interactive-defaults.ks for the payload and the default
+# target, leaving the disk choice to the Installation Destination page.
+label: "Pixel-Blue-Installer"
+grub2:
+  timeout: 10
+  entries:
+    - name: "Install Pixel Blue"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer console=tty0 inst.graphical selinux=0 rhgb quiet"
+      initrd: "/images/pxeboot/initrd.img"

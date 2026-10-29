@@ -440,7 +440,7 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build the install ISO with osbuild image-builder (bootc-installer)
+# Build the install ISO with osbuild image-builder (bootc-generic-iso)
 #
 # The ISO boots Anaconda. It installs the published Pixel Blue image from a
 # containers-storage copy embedded in the ISO, and installs the Flatpaks listed
@@ -450,16 +450,24 @@ build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build
 #
 # $target_image/$tag select the payload image; $payload_image is the registry
 # reference embedded for the offline install AND recorded as the installed
-# system's origin, so it must stay pullable; it defaults to GHCR:$tag.
+# system's origin, so it must stay pullable; it defaults to GHCR:$tag. It is
+# also passed to the installer image as PAYLOAD_REF, because it is baked into
+# interactive-defaults.ks (the kickstart Anaconda reads instead of inst.ks).
 #
 # image-builder never talks to a registry: it copies the payload out of the
 # host's rootful container storage, so the payload is pulled here first, with
 # this repo's cosign policy installed, so the pull is verified exactly like a
 # real client would verify it.
 #
-# The install itself is interactive (no kickstart is passed), so the user picks
-# the target disk in Anaconda. Add --config <file.toml> here to make it
-# unattended.
+# Why bootc-generic-iso and not the older bootc-installer type: the latter
+# hardcodes `inst.text` plus `inst.ks=hd:LABEL=...` in its kernel command line
+# (pkg/image/anaconda_container_installer.go), which forces the TUI installer
+# and an unattended install, and there is no configuration knob to change it.
+# With bootc-generic-iso the command line comes from our own
+# build_files/installer/iso.yaml (`inst.graphical`), and storage is left
+# unconfigured on purpose so Anaconda shows the Installation Destination page
+# and the user picks the disk -- the same path a Fedora Silverblue install
+# takes. Nothing here passes inst.ks.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -476,6 +484,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
     sudo podman build \
       --cap-add sys_admin \
       --security-opt label=disable \
+      --build-arg PAYLOAD_REF="${payload_image}" \
       --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
       --file Containerfile.installer .
 
@@ -508,7 +517,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       --bootc-installer-payload-ref "${payload_image}" \
       --bootc-default-fs btrfs \
       --progress verbose \
-      bootc-installer
+      bootc-generic-iso
 
     # The layout under --output-dir is image-builder's business (it nests by
     # name/type/arch), so find the ISO instead of guessing a path.

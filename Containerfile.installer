@@ -1,15 +1,15 @@
 # Installer image for the Pixel Blue ISO.
 #
-# This is the environment Anaconda runs in. osbuild image-builder turns it into
-# the `bootc-installer` artifact: the ISO's rootfs, plus the payload container
+# This is the environment Anaconda runs in. image-builder turns it into the
+# `bootc-generic-iso` artifact: the ISO's rootfs, plus the payload container
 # embedded from the host's container storage.
 #
 #   image-builder build \
 #     --bootc-ref localhost/pixel-blue-installer:latest \
 #     --bootc-installer-payload-ref ghcr.io/zhchmmx/pixel-blue:latest \
-#     bootc-installer
+#     bootc-generic-iso
 #
-# It carries two things beyond Anaconda itself:
+# It carries three things beyond Anaconda itself:
 #   1. /flatpak/repo -- an ostree repo holding every app in flatpak_refs/.
 #      pyanaconda's FlatpakManager hardcodes this path
 #      (LOCAL_REMOTE_PATH = "file:///flatpak/repo"), installs every app/ ref it
@@ -18,6 +18,20 @@
 #      preinstall offline and finished before the first boot.
 #   2. /etc/anaconda/conf.d/10-flatpak.conf -- the remote the *installed*
 #      system uses afterwards, so updates keep working.
+#   3. /usr/share/anaconda/interactive-defaults.ks -- the defaults Anaconda
+#      reads on an interactive run: which bootc image to deploy, and that the
+#      installed system should boot to a graphical login.
+#
+# Everything else here is the Anaconda runtime:
+#
+#   * /usr/lib/image-builder/bootc/iso.yaml -- only bootc-generic-iso reads it;
+#     it provides the GRUB menu and the kernel command line. The legacy
+#     bootc-installer type ignored it and hardcoded `inst.text` plus an
+#     inst.ks= pointing at a generated kickstart, so it could neither show a
+#     GUI nor stop and ask the user anything.
+#   * the lorax minimum below -- without it Anaconda cannot start from a bootc
+#     container at all (see the ISOs page of the image-builder docs and
+#     fedora-payload in ondrejbudai/bootc-isos).
 #
 # Build with:
 #   sudo podman build --cap-add sys_admin --security-opt label=disable \
@@ -36,11 +50,28 @@
 
 ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:44
 
+# The payload reference is baked into interactive-defaults.ks, so it has to be
+# the same value that is passed to --bootc-installer-payload-ref. build-disk.yml
+# passes it explicitly; the default keeps a local build working.
+ARG PAYLOAD_REF=ghcr.io/zhchmmx/pixel-blue:latest
+
 FROM ${BASE_IMAGE}
 
-# Anaconda plus the packages bootc-installer expects to find in the installer
-# container (see the ISOs page of the image-builder docs). flatpak-libs is what
-# Anaconda links against to deploy the local repo.
+ARG PAYLOAD_REF
+
+# Anaconda plus the packages bootc-generic-iso expects to find in the installer
+# container (see the ISOs page of the image-builder docs). Notes on the ones
+# that are not obvious:
+#   - anaconda (the metapackage) pulls anaconda-gui, i.e. the GTK installer.
+#     Anaconda runs the Web UI instead when anaconda-webui is installed and the
+#     GTK one is not, which is how Fedora 45 Atomic images do it.
+#   - xorriso/isomd5sum/grub2-tools/jq are build-time requirements of
+#     bootc-generic-iso (xorrisofs, implantisomd5, grub2-mkimage, and the
+#     kernel-install JSON parsing used by the dracut step).
+#   - flatpak-libs is what Anaconda links against to deploy the local repo.
+#   - plymouth and the fonts are what the graphical installer needs to render;
+#     the GPU firmware is what keeps it from coming up black on real hardware
+#     (osbuild/image-builder issue #2714).
 RUN dnf install -y \
       anaconda \
       anaconda-install-env-deps \
@@ -51,11 +82,22 @@ RUN dnf install -y \
       flatpak \
       flatpak-libs \
       grub2-efi-x64-cdboot \
+      grub2-tools \
       'lorax-templates-*' \
       net-tools \
       prefixdevname \
       python3-mako \
       squashfs-tools \
+      xorriso \
+      isomd5sum \
+      jq \
+      plymouth \
+      default-fonts-core-sans \
+      default-fonts-other-sans \
+      google-noto-sans-cjk-fonts \
+      linux-firmware \
+      intel-gpu-firmware \
+      mesa-dri-drivers \
  && dnf clean all
 
 # lorax wants to create a symlink in /mnt pointing at /var/mnt, which bootc
@@ -73,3 +115,61 @@ RUN /usr/libexec/pixel-blue/build-flatpak-repo.sh \
  && rm -f /usr/libexec/pixel-blue/build-flatpak-repo.sh
 
 COPY build_files/installer/10-flatpak.conf /etc/anaconda/conf.d/10-flatpak.conf
+
+# ISO GRUB menu + kernel command line. Written to both paths on purpose: the
+# current image-builder reads /usr/lib/image-builder/bootc/iso.yaml, while the
+# older bootc-image-builder layout (and several downstream examples) use
+# /usr/lib/bootc-image-builder/iso.yaml. Duplicating it costs 400 bytes and
+# removes a silent-failure mode where the wrong path leaves the ISO with the
+# default `root=live` command line instead of inst.stage2.
+COPY build_files/installer/iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+COPY build_files/installer/iso.yaml /usr/lib/bootc-image-builder/iso.yaml
+
+# Anaconda's defaults for an interactive run (payload + graphical target).
+COPY build_files/installer/interactive-defaults.ks.in /tmp/interactive-defaults.ks.in
+RUN sed "s|@PAYLOAD_REF@|${PAYLOAD_REF}|g" /tmp/interactive-defaults.ks.in \
+      > /usr/share/anaconda/interactive-defaults.ks \
+ && rm -f /tmp/interactive-defaults.ks.in
+
+# --- the lorax minimum -------------------------------------------------------
+# These steps are normally performed by lorax runtime-postinstall.tmpl. Without
+# them Anaconda will not start from a bootc container: there is no `install`
+# user, no anaconda.target as default.target, and the initramfs carries no
+# anaconda module. Distilled to the bare bones, same as fedora-payload.
+
+RUN echo "install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda" >> /etc/passwd \
+ && echo "install::14438:0:99999:7:::" >> /etc/shadow \
+ && passwd -d root
+
+RUN set -eux; \
+    mv /usr/share/anaconda/list-harddrives-stub /usr/bin/list-harddrives; \
+    if [ -d /etc/yum.repos.d ]; then \
+      mv /etc/yum.repos.d /etc/anaconda.repos.d; \
+    else \
+      mv /usr/share/dnf5/repos.d /etc/anaconda.repos.d; \
+    fi; \
+    ln -sf /usr/lib/systemd/system/anaconda.target /etc/systemd/system/default.target; \
+    rm -f /usr/lib/systemd/system-generators/systemd-gpt-auto-generator
+
+RUN rm -f /usr/lib/systemd/system/autovt@.service \
+ && ln -s /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service
+
+RUN mkdir -p /usr/lib/systemd/logind.conf.d \
+ && printf '[Login]\nReserveVT=2\n' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+
+# pipewire runs as the `install` user in the installer session; drop the
+# user-only condition so it starts there too.
+RUN mkdir -p /etc/systemd/user/pipewire.service.d /etc/systemd/user/pipewire.socket.d \
+ && printf '[Unit]\nConditionUser=\n' > /etc/systemd/user/pipewire.service.d/allowroot.conf \
+ && printf '[Unit]\nConditionUser=\n' > /etc/systemd/user/pipewire.socket.d/allowroot.conf
+
+# On bootc /root is a symlink to /var/roothome; Anaconda wants a real directory
+# to hang the installer home off.
+RUN mkdir -p "$(realpath /root)"
+
+# Regenerate the initramfs with the anaconda module. --no-hostonly is required:
+# this initramfs has to boot on whatever machine the ISO is plugged into.
+RUN kernel=$(kernel-install list --json pretty | jq -r '.[] | select(.has_kernel == true) | .version') \
+ && DRACUT_NO_XATTR=1 dracut --force -v --zstd --reproducible --no-hostonly \
+      --add anaconda \
+      "/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
