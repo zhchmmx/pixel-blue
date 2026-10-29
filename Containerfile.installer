@@ -140,6 +140,19 @@ RUN printf 'u install 0:0 "Anaconda Installer" /root /usr/libexec/anaconda/run-a
 RUN grep -q pam_systemd /etc/pam.d/anaconda \
  || sed -i '$a session optional pam_systemd.so' /etc/pam.d/anaconda
 
+# Which pages the installation summary shows is decided here, not in the
+# kickstart: Anaconda matches /etc/os-release against
+# /etc/anaconda/profile.d/*.conf. The fallback fedora.conf asks only for
+# os_id=fedora and therefore matches everything, while fedora-silverblue.conf
+# additionally requires variant_id=silverblue. The base image ships neither
+# VARIANT nor VARIANT_ID, so without these two lines the installer drops to the
+# generic profile and asks for Time & Date and User Creation -- both of which
+# Silverblue deliberately leaves to the first boot (gnome-initial-setup).
+#
+# These keys describe what this installer installs, not who we are: NAME and
+# PRETTY_NAME are untouched, so the identity shown stays that of the base image.
+RUN printf '\nVARIANT="Silverblue"\nVARIANT_ID=silverblue\n' >> /usr/lib/os-release
+
 # Take the auto-activated VTs away from getty.
 #
 # logind spawns autovt@ttyN for every VT it activates, and in the base image
