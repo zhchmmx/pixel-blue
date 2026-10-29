@@ -18,11 +18,25 @@ Visit [Pixel Blue Download Page](https://pixel-blue.pages.dev/) to download the 
 
 ```bash
 just build          # build localhost/pixel-blue:latest
-just build-iso      # wraps it into build/pixel-blue.iso with ublue-os/titanoboa
+just build-iso      # wraps it into build/pixel-blue.iso with osbuild image-builder
 just run-vm-iso     # boot the ISO in QEMU
 ```
 
-`just rebuild-iso` does the first two steps in one go. The titanoboa commit is pinned by `TITANOBOA_SHA` in `image-template.env` and must match the SHA in `.github/workflows/build-disk.yml`.
+`just rebuild-iso` does the first two steps in one go.
+
+The ISO is an **installer**, not a live session: it boots straight into Anaconda,
+where you pick the target disk. Building it takes two images:
+
+- `Containerfile.installer` — the environment Anaconda runs in. Besides Anaconda
+  it carries `/flatpak/repo`, a local Flatpak ostree repo built from
+  `flatpak_refs/`. Anaconda installs every app in it into the target's
+  `/var/lib/flatpak` **during the installation**, so the Flatpaks are there on
+  the first boot — no network, no first-boot script.
+- the published `pixel-blue` image itself, embedded as the install payload.
+
+The ISO is produced by [osbuild image-builder](https://github.com/osbuild/image-builder)
+as a `bootc-installer` artifact; the builder image is pinned by
+`IMAGE_BUILDER_IMAGE` in `image-template.env`.
 
 ## Option 2: Switch to Pixel Blue
 

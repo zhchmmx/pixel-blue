@@ -10,7 +10,7 @@ on:
         default: false
         type: boolean
       upload-iso-to-s3:
-        description: "Upload the Anaconda ISO to S3"
+        description: "Upload the install ISO to S3"
         required: false
         default: false
         type: boolean
@@ -19,8 +19,8 @@ on:
       - main
       - testing
     paths:
-      - 'Containerfile.iso'
-      - 'build_files/iso/**'
+      - 'Containerfile.installer'
+      - 'build_files/installer/**'
       - 'disk_config/disk.toml'
       - 'flatpak_refs/**'
       - '.github/workflows/build-disk.yml'
@@ -30,6 +30,7 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}" # do not edit
   DEFAULT_TAG: "latest"
   BIB_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+  IMAGE_BUILDER_IMAGE: "ghcr.io/osbuild/image-builder-cli:latest"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -105,14 +106,14 @@ jobs:
           sudo apt-get install -y rclone
           rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
-  # Live install ISO, built with ublue-os/titanoboa (issue #77).
-  # The ISO boots a GNOME live session; Anaconda installs the container image
-  # from a containers-storage copy embedded in the ISO (offline), copies the
-  # Flatpak apps from flatpak_refs/ into the target and repoints the installed
-  # deployment at the signed GHCR image. The live/installer environment is a
-  # second image built from Containerfile.iso and is never pushed.
+  # Install ISO, built with osbuild image-builder (bootc-installer).
+  # The ISO boots Anaconda; it installs the published image from a
+  # containers-storage copy embedded in the ISO and the Flatpaks from
+  # flatpak_refs/ out of the local ostree repo baked into the installer image.
+  # Both happen before the first boot and need no network. There is no live
+  # desktop -- this is an installer, not a live session.
   build-iso:
-    name: Build live ISO
+    name: Build install ISO
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -133,41 +134,80 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Build live ISO layer
+      - name: Build installer image
         run: |
           set -euxo pipefail
           BASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
-          # The layer's build pulls the installer payload into its own
-          # container storage and installs Flatpaks, so the nested podman
-          # needs the extra capabilities and unconfined labels.
+          # Flatpak runs inside this build, so bwrap needs sys_admin and
+          # unconfined labels.
           sudo podman build \
             --cap-add sys_admin \
             --security-opt label=disable \
             --build-arg BASE_IMAGE="${BASE_IMAGE}" \
-            --build-arg PAYLOAD_IMAGE="${BASE_IMAGE}" \
-            --tag "localhost/${IMAGE_NAME}-iso:${DEFAULT_TAG}" \
-            --file Containerfile.iso .
+            --tag "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
+            --file Containerfile.installer .
 
-      - name: Build ISO with titanoboa
+      - name: Pull install payload into rootful storage
+        run: |
+          set -euxo pipefail
+          # image-builder copies the payload out of the host's container
+          # storage -- it never contacts a registry -- so the payload has to
+          # be there before the ISO is assembled. Installing this repo's
+          # policy first makes the pull verify the cosign signature, exactly
+          # like a client would.
+          sudo install -Dm644 system_files/etc/pki/containers/pixel-blue.pub /etc/pki/containers/pixel-blue.pub
+          sudo install -Dm644 system_files/etc/containers/policy.json /etc/containers/policy.json
+          sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml /etc/containers/registries.d/pixel-blue.yaml
+          sudo podman pull "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
+
+      - name: Build ISO with image-builder
         id: build
-        uses: ublue-os/titanoboa@5c457c3d0518bd17e754be0fd98a60d29d26abb4 # main (2026-06-18)
-        with:
-          image-ref: localhost/${{ env.IMAGE_NAME }}-iso:${{ env.DEFAULT_TAG }}
-          # titanoboa resolves a relative iso-dest against its own action
-          # directory, so hand it an absolute path outside the workspace.
-          iso-dest: ${{ runner.temp }}/pixel-blue.iso
+        run: |
+          set -euxo pipefail
+          out="${RUNNER_TEMP}/iso-out"
+          mkdir -p "${out}"
+          # Fedora bootc containers do not declare a root filesystem and
+          # image-builder refuses to guess one, so pass the same ext4 default
+          # bootc-image-builder uses for the qcow2/raw images.
+          sudo podman run --rm \
+            --privileged \
+            --pull=newer \
+            --security-opt label=type:unconfined_t \
+            -v "${out}":/output \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "${IMAGE_BUILDER_IMAGE}" \
+            build \
+            --output-dir /output \
+            --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
+            --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            --bootc-default-fs btrfs \
+            --progress verbose \
+            bootc-installer
+
+          # The layout under --output-dir is image-builder's business (it
+          # nests by name/type/arch), so find the ISO instead of guessing.
+          iso="$(find "${out}" -type f -name '*.iso' | head -n1)"
+          if [[ -z "${iso}" ]]; then
+            echo "::error::image-builder produced no ISO under ${out}"
+            exit 1
+          fi
+          echo "iso-path=${iso}" >> "$GITHUB_OUTPUT"
 
       - name: Name and checksum ISO
         id: checksum
         env:
-          ISO_PATH: ${{ steps.build.outputs.iso-dest }}
+          ISO_PATH: ${{ steps.build.outputs.iso-path }}
         run: |
           set -euo pipefail
-          iso_dir="$(dirname "$ISO_PATH")"
-          iso_name="$(basename "$ISO_PATH")"
-          (cd "$iso_dir" && sha256sum "$iso_name" | tee "${iso_name}-CHECKSUM")
-          echo "iso-path=${ISO_PATH}" >> "$GITHUB_OUTPUT"
-          echo "checksum-path=${ISO_PATH}-CHECKSUM" >> "$GITHUB_OUTPUT"
+          # Move the ISO out of image-builder's output tree into a flat dir,
+          # so the upload steps below and the S3 version file share one
+          # predictable location.
+          dist="${RUNNER_TEMP}/dist"
+          mkdir -p "${dist}"
+          mv "${ISO_PATH}" "${dist}/pixel-blue.iso"
+          (cd "${dist}" && sha256sum pixel-blue.iso | tee pixel-blue.iso-CHECKSUM)
+          echo "iso-path=${dist}/pixel-blue.iso" >> "$GITHUB_OUTPUT"
+          echo "checksum-path=${dist}/pixel-blue.iso-CHECKSUM" >> "$GITHUB_OUTPUT"
 
       - name: Upload ISO and Checksum to Job Artifacts
         if: inputs.upload-iso-to-s3 != true && github.event_name != 'pull_request'
