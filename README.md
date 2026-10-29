@@ -24,8 +24,10 @@ just run-vm-iso     # boot the ISO in QEMU
 
 `just rebuild-iso` does the first two steps in one go.
 
-The ISO is an **installer**, not a live session: it boots straight into Anaconda,
-where you pick the target disk. Building it takes two images:
+The ISO is an **installer**, not a live session: it boots into the graphical
+Anaconda installer, where you pick the target disk and keep the default
+`Automatic` layout — the same path a Fedora Silverblue install takes. Building
+it takes two images:
 
 - `Containerfile.installer` — the environment Anaconda runs in. Besides Anaconda
   it carries `/flatpak/repo`, a local Flatpak ostree repo built from
@@ -35,8 +37,12 @@ where you pick the target disk. Building it takes two images:
 - the published `pixel-blue` image itself, embedded as the install payload.
 
 The ISO is produced by [osbuild image-builder](https://github.com/osbuild/image-builder)
-as a `bootc-installer` artifact; the builder image is pinned by
-`IMAGE_BUILDER_IMAGE` in `image-template.env`.
+as a `bootc-generic-iso` artifact. Its kernel command line and GRUB menu come
+from `build_files/installer/iso.yaml` (`inst.graphical`), and the payload plus
+the graphical default target from `build_files/installer/interactive-defaults.ks.in`.
+No kickstart is passed, so the installer stays interactive. The builder image is
+selected by `IMAGE_BUILDER_IMAGE` in `image-template.env`; `build-disk.yml`
+prints the digest it resolved, which is what to pin it to.
 
 ## Option 2: Switch to Pixel Blue
 
