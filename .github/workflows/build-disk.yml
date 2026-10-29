@@ -177,7 +177,8 @@ jobs:
             grep -q pam_systemd /etc/pam.d/anaconda || { echo "ERROR: /etc/pam.d/anaconda has no pam_systemd -- the kiosk compositor cannot get a logind session"; exit 1; }
             cat /etc/pam.d/anaconda
             echo "--- install profile ---"
-            grep -q "^VARIANT_ID=silverblue$" /usr/lib/os-release || { echo "ERROR: VARIANT_ID is not silverblue -- Anaconda falls back to the generic profile"; exit 1; }
+            grep -q "^VARIANT_ID=pixel-blue$" /usr/lib/os-release || { echo "ERROR: VARIANT_ID is not pixel-blue -- Anaconda falls back to the generic profile"; exit 1; }
+            grep -q "base_profile = fedora-silverblue" /etc/anaconda/profile.d/pixel-blue.conf || { echo "ERROR: pixel-blue profile missing or not based on fedora-silverblue"; exit 1; }
             echo "--- product identity ---"
             cat /.buildstamp
             grep -q "^IsFinal=True$" /.buildstamp || { echo "ERROR: buildstamp says pre-release -- Anaconda shows the pre-release badge"; exit 1; }

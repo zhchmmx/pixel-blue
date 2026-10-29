@@ -140,18 +140,23 @@ RUN printf 'u install 0:0 "Anaconda Installer" /root /usr/libexec/anaconda/run-a
 RUN grep -q pam_systemd /etc/pam.d/anaconda \
  || sed -i '$a session optional pam_systemd.so' /etc/pam.d/anaconda
 
-# Which pages the installation summary shows is decided here, not in the
-# kickstart: Anaconda matches /etc/os-release against
+# Which pages the installation summary shows, and how the target disk is
+# partitioned by default, are both decided by matching /etc/os-release against
 # /etc/anaconda/profile.d/*.conf. The fallback fedora.conf asks only for
-# os_id=fedora and therefore matches everything, while fedora-silverblue.conf
-# additionally requires variant_id=silverblue. The base image ships neither
-# VARIANT nor VARIANT_ID, so without these two lines the installer drops to the
-# generic profile and asks for Time & Date and User Creation -- both of which
-# Silverblue deliberately leaves to the first boot (gnome-initial-setup).
+# os_id=fedora and therefore matches everything; the base image ships neither
+# VARIANT nor VARIANT_ID, so without a variant the installer drops to that
+# generic profile: Time & Date and User Creation spokes that Silverblue
+# deliberately leaves to the first boot.
 #
-# These keys describe what this installer installs, not who we are: NAME and
-# PRETTY_NAME are untouched, so the identity shown stays that of the base image.
-RUN printf '\nVARIANT="Silverblue"\nVARIANT_ID=silverblue\n' >> /usr/lib/os-release
+# Our profile inherits fedora-silverblue and rewrites one thing -- the default
+# partitioning. The Silverblue plan also wants /var and /home btrfs subvolumes,
+# and a bootc deployment uses neither: its fstab references only /boot, and
+# /var comes from ostree/deploy/<stateroot>/var. Left in the plan, the /var
+# subvolume makes PrepareBootcMountTargetsTask bind a mount that was never
+# mounted and the payload step dies on it. See pixel-blue.conf for the details.
+# VARIANT_ID=pixel-blue matches our profile and nothing upstream.
+COPY build_files/installer/pixel-blue.conf /etc/anaconda/profile.d/pixel-blue.conf
+RUN printf '\nVARIANT="Pixel Blue"\nVARIANT_ID=pixel-blue\n' >> /usr/lib/os-release
 
 # Anaconda takes the product identity it shows from /.buildstamp first, then
 # from the ANACONDA_* environment variables, then from a hardcoded last resort
