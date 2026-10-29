@@ -1,0 +1,17 @@
+# GRUB menu and kernel command line for the installer ISO.
+#
+# image-builder reads this only for the bootc-generic-iso type, and this is
+# where the installer's mode is decided:
+#
+#   * label must match inst.stage2=hd:LABEL= below, and fit in 32 characters
+#   * console= on its own implies inst.text, so inst.graphical is explicit
+#   * no inst.ks=: without it Anaconda runs interactively and reads
+#     /usr/share/anaconda/interactive-defaults.ks for the payload and the
+#     graphical target, leaving the disk choice to the user
+label: "Pixel-Blue-Installer"
+grub2:
+  timeout: 10
+  entries:
+    - name: "Install Pixel Blue"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer console=tty0 inst.graphical selinux=0 rhgb quiet"
+      initrd: "/images/pxeboot/initrd.img"

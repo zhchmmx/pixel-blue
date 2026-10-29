@@ -1,0 +1,23 @@
+# Defaults for an interactive Anaconda run.
+#
+# Anaconda reads this only when the kernel command line carries no inst.ks=.
+# It is a kickstart, but without the automated flags, so the installer still
+# stops and asks for anything left unconfigured -- the disk, in our case.
+#
+# @PAYLOAD_SRC@ / @PAYLOAD_TARGET@ are substituted by Containerfile.installer:
+#
+#   source -- what bootc copies from. A name in the installer's own container
+#             storage, so it needs the containers-storage: transport and must
+#             match --bootc-installer-payload-ref exactly.
+#   target -- what the installed system tracks for updates. A registry
+#             reference; pykickstart rejects a transport prefix here.
+#
+# `xconfig --startxonboot` pins graphical.target. Left alone, Anaconda only
+# picks graphical when it can prove the target has a graphical login manager
+# and falls back to multi-user.target otherwise, i.e. a console-only system.
+#
+# No storage directives on purpose: that is what makes Anaconda show the
+# Installation Destination page and let the user pick the disk.
+bootc --source-imgref containers-storage:@PAYLOAD_SRC@ --target-imgref @PAYLOAD_TARGET@
+
+xconfig --startxonboot

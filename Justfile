@@ -440,26 +440,19 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build the install ISO with osbuild image-builder (bootc-installer)
+# Build the install ISO with osbuild image-builder (bootc-generic-iso)
 #
-# The ISO boots Anaconda. It installs the published Pixel Blue image from a
-# containers-storage copy embedded in the ISO, and installs the Flatpaks listed
-# in flatpak_refs/ out of the local ostree repo baked into the installer image
-# -- both before the first boot and both without any network access. There is
-# no live desktop: this is an installer, not a live session.
+# The ISO boots Anaconda with the Web UI; the user picks the disk and keeps the
+# Automatic layout. It installs the published Pixel Blue image from a container
+# copy embedded in the ISO, plus the Flatpaks in flatpak_refs/ out of the local
+# ostree repo baked into the installer image -- both offline, both before the
+# first boot. There is no live desktop: this is an installer.
 #
-# $target_image/$tag select the payload image; $payload_image is the registry
-# reference embedded for the offline install AND recorded as the installed
-# system's origin, so it must stay pullable; it defaults to GHCR:$tag.
-#
-# image-builder never talks to a registry: it copies the payload out of the
-# host's rootful container storage, so the payload is pulled here first, with
-# this repo's cosign policy installed, so the pull is verified exactly like a
-# real client would verify it.
-#
-# The install itself is interactive (no kickstart is passed), so the user picks
-# the target disk in Anaconda. Add --config <file.toml> here to make it
-# unattended.
+# $target_image/$tag select the payload image; $payload_image is the published
+# reference, which is what the installed system follows for updates and what
+# interactive-defaults.ks records as the target. The payload is copied to a
+# local reference first because image-builder reads it out of host storage and
+# refuses images that still carry signature attachments.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
@@ -469,15 +462,12 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
-    # fedora-bootc base (see Containerfile.installer). The payload image is
-    # passed separately to image-builder below. Flatpak runs inside this build
-    # (bwrap needs sys_admin), hence the caps.
-    sudo podman build \
-      --cap-add sys_admin \
-      --security-opt label=disable \
-      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --file Containerfile.installer .
+    # The payload is re-tagged into the host's storage under a local reference
+    # (below), which is what the installer image bakes into
+    # interactive-defaults.ks and what image-builder embeds in the ISO. The
+    # published reference is still recorded as the installed system's update
+    # source, hence two variables.
+    payload_src="localhost/{{ image_name }}-payload:{{ tag }}"
 
     # Install this repo's containers policy on the host first, so the pull
     # below enforces the cosign signature instead of trusting anything.
@@ -487,14 +477,35 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       /etc/containers/registries.d/pixel-blue.yaml
     sudo podman pull "${payload_image}"
 
+    # Drop the signature attachments the pull just stored (registries.d sets
+    # use-sigstore-attachments). image-builder later copies the payload into
+    # the ISO's container storage with skopeo, which refuses to re-encode the
+    # layers of an image whose signatures are attached locally: "Would
+    # invalidate signatures". Verification already happened above, so the
+    # attachments have served their purpose. Copying to a local reference
+    # (rather than stripping in place) also pins the name the installer sees.
+    sudo skopeo copy --remove-signatures \
+      "containers-storage:${payload_image}" "containers-storage:${payload_src}"
+
+    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
+    # fedora-bootc base (see Containerfile.installer). The payload image is
+    # passed separately to image-builder below. Flatpak runs inside this build
+    # (bwrap needs sys_admin), hence the caps.
+    sudo podman build \
+      --cap-add sys_admin \
+      --security-opt label=disable \
+      --build-arg PAYLOAD_SRC_REF="${payload_src}" \
+      --build-arg PAYLOAD_TARGET_REF="${payload_image}" \
+      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
+      --file Containerfile.installer .
+
     # image-builder writes into --output-dir; use a scratch dir so a rerun can
     # never pick up a stale ISO.
     iso_out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
     trap 'rm -rf "${iso_out}"' EXIT
     mkdir -p build
     # Fedora bootc containers do not declare a root filesystem and
-    # image-builder refuses to guess one, so pass the same ext4 default
-    # bootc-image-builder uses for the qcow2/raw images.
+    # image-builder refuses to guess one, so name it explicitly.
     sudo podman run --rm \
       --privileged \
       --pull=newer \
@@ -505,10 +516,10 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       build \
       --output-dir /output \
       --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --bootc-installer-payload-ref "${payload_image}" \
+      --bootc-installer-payload-ref "${payload_src}" \
       --bootc-default-fs btrfs \
       --progress verbose \
-      bootc-installer
+      bootc-generic-iso
 
     # The layout under --output-dir is image-builder's business (it nests by
     # name/type/arch), so find the ISO instead of guessing a path.
