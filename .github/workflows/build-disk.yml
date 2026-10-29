@@ -162,10 +162,34 @@ jobs:
           # be there before the ISO is assembled. Installing this repo's
           # policy first makes the pull verify the cosign signature, exactly
           # like a client would.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
           sudo install -Dm644 system_files/etc/pki/containers/pixel-blue.pub /etc/pki/containers/pixel-blue.pub
           sudo install -Dm644 system_files/etc/containers/policy.json /etc/containers/policy.json
           sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml /etc/containers/registries.d/pixel-blue.yaml
           sudo podman pull "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
+
+          # Now drop the signature attachments from local storage.
+          #
+          # registries.d/pixel-blue.yaml sets use-sigstore-attachments, so the
+          # pull above stored the cosign signature next to the image. When
+          # image-builder later copies that image into the ISO's container
+          # storage, skopeo refuses:
+          #
+          #   Copying this image would require changing layer representation,
+          #   which we cannot do: "Would invalidate signatures"
+          #
+          # The copy has to re-encode the layers (the ISO's storage is created
+          # from scratch), and containers/image will not do that to an image
+          # whose signatures are present, because the result would no longer
+          # match them. Verification has already happened, so the attachments
+          # have served their purpose; removing them is the documented
+          # workaround for building ISOs from signed containers. Copying the
+          # image onto itself with --remove-signatures drops just the
+          # attachments, not the image.
+          ref="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
+          sudo skopeo copy --remove-signatures \
+            "containers-storage:${ref}" "containers-storage:${ref}"
 
       - name: Build ISO with image-builder
         id: build

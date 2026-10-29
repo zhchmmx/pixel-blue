@@ -496,6 +496,15 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       /etc/containers/registries.d/pixel-blue.yaml
     sudo podman pull "${payload_image}"
 
+    # Drop the signature attachments the pull just stored (registries.d sets
+    # use-sigstore-attachments). image-builder copies the payload into the
+    # ISO's container storage with skopeo, which refuses to re-encode the
+    # layers of an image whose signatures are attached locally: "Would
+    # invalidate signatures". Verification already happened above, so the
+    # attachments are no longer needed. Same command as build-disk.yml.
+    sudo skopeo copy --remove-signatures \
+      "containers-storage:${payload_image}" "containers-storage:${payload_image}"
+
     # image-builder writes into --output-dir; use a scratch dir so a rerun can
     # never pick up a stale ISO.
     iso_out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
