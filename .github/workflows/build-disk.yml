@@ -178,6 +178,9 @@ jobs:
             cat /etc/pam.d/anaconda
             echo "--- install profile ---"
             grep -q "^VARIANT_ID=silverblue$" /usr/lib/os-release || { echo "ERROR: VARIANT_ID is not silverblue -- Anaconda falls back to the generic profile"; exit 1; }
+            echo "--- product identity ---"
+            cat /.buildstamp
+            grep -q "^IsFinal=True$" /.buildstamp || { echo "ERROR: buildstamp says pre-release -- Anaconda shows the pre-release badge"; exit 1; }
             echo "--- units ---"
             ls /usr/lib/systemd/system/ 2>/dev/null | grep -i anaconda || true
             echo "--- interactive defaults ---"

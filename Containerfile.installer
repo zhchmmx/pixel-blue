@@ -153,6 +153,19 @@ RUN grep -q pam_systemd /etc/pam.d/anaconda \
 # PRETTY_NAME are untouched, so the identity shown stays that of the base image.
 RUN printf '\nVARIANT="Silverblue"\nVARIANT_ID=silverblue\n' >> /usr/lib/os-release
 
+# Anaconda takes the product identity it shows from /.buildstamp first, then
+# from the ANACONDA_* environment variables, then from a hardcoded last resort
+# inside pyanaconda: product "anaconda", version "bluesky", IsFinal false.
+# image-builder writes no buildstamp for bootc-generic-iso, so every level fell
+# through and the installer introduced itself as "ANACONDA BLUESKY" with a
+# pre-release badge underneath. This is the file lorax normally writes.
+#
+# Version follows VERSION_ID so it keeps tracking the base image instead of
+# being pinned here.
+RUN version="$(sed -n 's/^VERSION_ID=//p' /usr/lib/os-release)" \
+ && test -n "$version" \
+ && printf '[Main]\nProduct=Pixel Blue\nVersion=%s\nIsFinal=True\n' "$version" > /.buildstamp
+
 # Take the auto-activated VTs away from getty.
 #
 # logind spawns autovt@ttyN for every VT it activates, and in the base image
