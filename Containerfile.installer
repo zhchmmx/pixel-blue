@@ -11,7 +11,7 @@
 #     bootc-generic-iso
 #
 # Responsibilities, in the order they appear below:
-#   * Anaconda running the Web UI on a kiosk compositor
+#   * Anaconda's GTK interface, drawn on a kiosk compositor
 #   * the ISO's GRUB menu and kernel command line            (iso.yaml)
 #   * what gets installed and how it boots afterwards        (interactive-defaults.ks)
 #   * /flatpak/repo, the offline Flatpak source Anaconda installs during the run
@@ -125,18 +125,27 @@ RUN printf 'u install 0:0 "Anaconda Installer" /root /usr/libexec/anaconda/run-a
  && systemd-sysusers anaconda.conf \
  && passwd -d root
 
+# Anaconda does not draw its own screen. It hands the UI to a Wayland compositor
+# it starts through /usr/libexec/anaconda/run-in-new-session, and that helper
+# opens a PAM session for the service named on its command line, which is
+# "anaconda". The /etc/pam.d/anaconda that ships with the package covers auth
+# and account only -- its session stack has no pam_systemd.so, so logind is
+# never told the compositor exists. gnome-kiosk then dies in
+# sd_pid_get_session() with "Failed to setup: Failed to find any matching
+# session", /run/user/0 is never created, and Anaconda reports "exited on
+# signal 1" and falls back to a TUI that has no terminal to draw on.
+#
+# The same command run by hand works, because the helper's default service
+# (su-l) does include pam_systemd. This line is the whole difference.
+RUN grep -q pam_systemd /etc/pam.d/anaconda \
+ || sed -i '$a session optional pam_systemd.so' /etc/pam.d/anaconda
+
 # Take the auto-activated VTs away from getty.
 #
 # logind spawns autovt@ttyN for every VT it activates, and in the base image
-# autovt@ points at getty@. Anaconda then starts its Wayland session
-# (gnome-kiosk) on one of those VTs, which is already held by an agetty:
-# the compositor is killed by SIGHUP before it can draw anything, Anaconda
-# reports "Wayland startup failed ... exited on signal 1" and falls back to a
-# TUI that has no terminal to render on, leaving a black screen.
-#
-# Pointing autovt at anaconda-shell@ instead gives each VT a pre-logged-in
-# shell that yields to whatever takes the VT over, which is what the reference
-# installer images do.
+# autovt@ points at getty@, which puts a login prompt on the VT the installer is
+# about to draw on. anaconda-shell@ is what the reference installer images use
+# there: an already-open shell that hands the VT over instead of a login prompt.
 RUN rm -f /usr/lib/systemd/system/autovt@.service \
  && ln -s /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service
 

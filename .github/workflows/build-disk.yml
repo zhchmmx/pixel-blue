@@ -173,6 +173,9 @@ jobs:
             echo "--- UI packages ---"
             rpm -q anaconda-install-img-deps anaconda anaconda-gui gnome-kiosk 2>&1 || true
             rpm -q anaconda-webui 2>/dev/null && { echo "ERROR: anaconda-webui installed -- the ISO would be the Web UI"; exit 1; }
+            echo "--- installer session ---"
+            grep -q pam_systemd /etc/pam.d/anaconda || { echo "ERROR: /etc/pam.d/anaconda has no pam_systemd -- the kiosk compositor cannot get a logind session"; exit 1; }
+            cat /etc/pam.d/anaconda
             echo "--- units ---"
             ls /usr/lib/systemd/system/ 2>/dev/null | grep -i anaconda || true
             echo "--- interactive defaults ---"
