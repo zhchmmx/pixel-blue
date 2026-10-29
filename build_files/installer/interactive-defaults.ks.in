@@ -5,18 +5,25 @@
 # install flag, so the installer still stops and asks about anything left
 # unconfigured -- the disk, in our case.
 #
-# @PAYLOAD_REF@ is substituted by Containerfile.installer from the PAYLOAD_REF
-# build argument, so the reference always matches what --bootc-installer-payload-ref
-# embedded in the ISO.
+# @PAYLOAD_SRC@ and @PAYLOAD_TARGET@ are substituted by Containerfile.installer
+# from build arguments. They are deliberately separate:
 #
-# Why these two lines are needed:
+#   source -- what bootc copies from, looked up in the installer environment's
+#             own container storage, so it must carry the containers-storage:
+#             transport AND match the name image-builder used when it embedded
+#             the payload (--bootc-installer-payload-ref).
+#   target -- what the installed system tracks for updates: the published
+#             registry reference, with no transport prefix (pykickstart rejects
+#             one).
+#
+# Keeping them separate is what lets build-disk.yml re-tag the payload locally
+# (to shed the signature attachments that image-builder's copy cannot handle)
+# without changing where the installed system gets its updates from.
+#
+# Why these two directives are needed:
 #
 # 1. Payload. There is no inst.ks= telling Anaconda what to install, so the
-#    bootc container has to be named here. The ISO carries a copy of it in its
-#    container storage (--bootc-installer-payload-ref), hence the
-#    containers-storage: transport. --target-imgref must NOT carry a transport
-#    prefix (pykickstart rejects one); it is the reference the installed system
-#    tracks for future updates.
+#    bootc container has to be named here.
 #
 # 2. Desktop. With no explicit target Anaconda guesses: it looks for a package
 #    providing service(graphical-login) in the target and falls back to
@@ -30,6 +37,6 @@
 # Installation Destination page (pick the disk, keep Automatic, Done) instead
 # of silently wiping the first disk the way the kickstart-driven
 # bootc-installer build did.
-bootc --source-imgref containers-storage:@PAYLOAD_REF@ --target-imgref @PAYLOAD_REF@
+bootc --source-imgref containers-storage:@PAYLOAD_SRC@ --target-imgref @PAYLOAD_TARGET@
 
 xconfig --startxonboot

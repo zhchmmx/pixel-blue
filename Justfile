@@ -477,16 +477,12 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
 
     payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
 
-    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
-    # fedora-bootc base (see Containerfile.installer). The payload image is
-    # passed separately to image-builder below. Flatpak runs inside this build
-    # (bwrap needs sys_admin), hence the caps.
-    sudo podman build \
-      --cap-add sys_admin \
-      --security-opt label=disable \
-      --build-arg PAYLOAD_REF="${payload_image}" \
-      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --file Containerfile.installer .
+    # The payload is re-tagged into the host's storage under a local reference
+    # (below), which is what the installer image bakes into
+    # interactive-defaults.ks and what image-builder embeds in the ISO. The
+    # published reference is still recorded as the installed system's update
+    # source, hence two variables.
+    payload_src="localhost/{{ image_name }}-payload:{{ tag }}"
 
     # Install this repo's containers policy on the host first, so the pull
     # below enforces the cosign signature instead of trusting anything.
@@ -497,13 +493,26 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
     sudo podman pull "${payload_image}"
 
     # Drop the signature attachments the pull just stored (registries.d sets
-    # use-sigstore-attachments). image-builder copies the payload into the
-    # ISO's container storage with skopeo, which refuses to re-encode the
+    # use-sigstore-attachments). image-builder later copies the payload into
+    # the ISO's container storage with skopeo, which refuses to re-encode the
     # layers of an image whose signatures are attached locally: "Would
     # invalidate signatures". Verification already happened above, so the
-    # attachments are no longer needed. Same command as build-disk.yml.
+    # attachments have served their purpose. Copying to a local reference
+    # (rather than stripping in place) also pins the name the installer sees.
     sudo skopeo copy --remove-signatures \
-      "containers-storage:${payload_image}" "containers-storage:${payload_image}"
+      "containers-storage:${payload_image}" "containers-storage:${payload_src}"
+
+    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
+    # fedora-bootc base (see Containerfile.installer). The payload image is
+    # passed separately to image-builder below. Flatpak runs inside this build
+    # (bwrap needs sys_admin), hence the caps.
+    sudo podman build \
+      --cap-add sys_admin \
+      --security-opt label=disable \
+      --build-arg PAYLOAD_SRC_REF="${payload_src}" \
+      --build-arg PAYLOAD_TARGET_REF="${payload_image}" \
+      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
+      --file Containerfile.installer .
 
     # image-builder writes into --output-dir; use a scratch dir so a rerun can
     # never pick up a stale ISO.
@@ -523,7 +532,7 @@ build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_ima
       build \
       --output-dir /output \
       --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --bootc-installer-payload-ref "${payload_image}" \
+      --bootc-installer-payload-ref "${payload_src}" \
       --bootc-default-fs btrfs \
       --progress verbose \
       bootc-generic-iso

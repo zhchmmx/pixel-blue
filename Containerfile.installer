@@ -50,14 +50,23 @@
 
 ARG BASE_IMAGE=quay.io/fedora/fedora-bootc:44
 
-# The payload reference is baked into interactive-defaults.ks, so it has to be
-# the same value that is passed to --bootc-installer-payload-ref. build-disk.yml
-# passes it explicitly; the default keeps a local build working.
-ARG PAYLOAD_REF=ghcr.io/zhchmmx/pixel-blue:latest
+# Two payload references end up in interactive-defaults.ks, and they are not
+# the same value:
+#   PAYLOAD_SRC_REF    -- how the payload is named inside the installer
+#                         environment's container storage, i.e. the value
+#                         passed to --bootc-installer-payload-ref.
+#   PAYLOAD_TARGET_REF -- the published reference the installed system tracks
+#                         for updates (no transport prefix allowed there).
+# build-disk.yml re-tags the payload to a local reference to shed the cosign
+# signature attachments that image-builder's copy cannot handle, so source and
+# target differ in CI. The defaults keep a local build working when they don't.
+ARG PAYLOAD_SRC_REF=ghcr.io/zhchmmx/pixel-blue:latest
+ARG PAYLOAD_TARGET_REF=ghcr.io/zhchmmx/pixel-blue:latest
 
 FROM ${BASE_IMAGE}
 
-ARG PAYLOAD_REF
+ARG PAYLOAD_SRC_REF
+ARG PAYLOAD_TARGET_REF
 
 # Anaconda plus the packages bootc-generic-iso expects to find in the installer
 # container (see the ISOs page of the image-builder docs). Notes on the ones
@@ -134,8 +143,9 @@ COPY build_files/installer/iso.yaml /usr/lib/bootc-image-builder/iso.yaml
 
 # Anaconda's defaults for an interactive run (payload + graphical target).
 COPY build_files/installer/interactive-defaults.ks.in /tmp/interactive-defaults.ks.in
-RUN sed "s|@PAYLOAD_REF@|${PAYLOAD_REF}|g" /tmp/interactive-defaults.ks.in \
-      > /usr/share/anaconda/interactive-defaults.ks \
+RUN sed -e "s|@PAYLOAD_SRC@|${PAYLOAD_SRC_REF}|g" \
+        -e "s|@PAYLOAD_TARGET@|${PAYLOAD_TARGET_REF}|g" \
+        /tmp/interactive-defaults.ks.in > /usr/share/anaconda/interactive-defaults.ks \
  && rm -f /tmp/interactive-defaults.ks.in
 
 # --- the lorax minimum -------------------------------------------------------

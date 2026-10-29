@@ -131,6 +131,13 @@ jobs:
           # Lowercase the image uri
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> ${GITHUB_ENV}
+          # The payload ends up in the ISO under a local reference (the pull
+          # step re-tags it there to shed the cosign signature attachments),
+          # while the installed system tracks the published one for updates.
+          {
+            echo "PAYLOAD_SRC_REF=localhost/${IMAGE_NAME,,}-payload:${DEFAULT_TAG}"
+            echo "PAYLOAD_TARGET_REF=${IMAGE_REGISTRY,,}/${IMAGE_NAME,,}:${DEFAULT_TAG}"
+          } >> ${GITHUB_ENV}
 
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
@@ -144,15 +151,49 @@ jobs:
         run: |
           set -euxo pipefail
           # Flatpak runs inside this build, so bwrap needs sys_admin and
-          # unconfined labels. PAYLOAD_REF is baked into
-          # interactive-defaults.ks, so it must match the reference passed to
-          # --bootc-installer-payload-ref below.
+          # unconfined labels. The payload references are baked into
+          # interactive-defaults.ks, so they must match what
+          # --bootc-installer-payload-ref and the pull step produced.
           sudo podman build \
             --cap-add sys_admin \
             --security-opt label=disable \
-            --build-arg PAYLOAD_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            --build-arg PAYLOAD_SRC_REF="${PAYLOAD_SRC_REF}" \
+            --build-arg PAYLOAD_TARGET_REF="${PAYLOAD_TARGET_REF}" \
             --tag "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
             --file Containerfile.installer .
+
+      # Informational, not a gate: it prints what the installer image actually
+      # contains, so a UI that fails to come up in a VM can be diagnosed from
+      # the job log instead of a second 30-minute build. The local display path
+      # for the Web UI is the fragile part -- it needs a browser/WebView plus
+      # something to open it on, and nothing here proves that chain works.
+      - name: Inspect installer UI plumbing
+        run: |
+          set -uo pipefail
+          img="localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}"
+          script='
+            echo "--- UI packages ---"
+            rpm -q anaconda-webui anaconda-gui slitherer webkit2gtk4.1 firefox cockpit-ws 2>&1 || true
+            echo "--- launcher ---"
+            ls -l /usr/libexec/anaconda/webui-desktop 2>&1 || true
+            echo "--- default browser command ---"
+            grep -n "DEFAULT_BROWSER_CMD" /usr/libexec/anaconda/webui-desktop 2>&1 || true
+            echo "--- units ---"
+            ls /usr/lib/systemd/system/ 2>/dev/null | grep -i anaconda || true
+            echo "--- interactive defaults ---"
+            cat /usr/share/anaconda/interactive-defaults.ks 2>&1 || true
+          '
+          sudo podman run --rm --entrypoint /bin/sh "${img}" -c "${script}" \
+            | tee "${RUNNER_TEMP}/installer-ui.txt"
+          {
+            echo "<details><summary>Installer UI plumbing</summary>"
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/installer-ui.txt"
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pull install payload into rootful storage
         run: |
@@ -169,27 +210,30 @@ jobs:
           sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml /etc/containers/registries.d/pixel-blue.yaml
           sudo podman pull "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
 
-          # Now drop the signature attachments from local storage.
+          # Re-tag the payload to a local reference, dropping the signature
+          # attachments on the way.
           #
           # registries.d/pixel-blue.yaml sets use-sigstore-attachments, so the
           # pull above stored the cosign signature next to the image. When
-          # image-builder later copies that image into the ISO's container
-          # storage, skopeo refuses:
+          # image-builder copies that image into the ISO's container storage,
+          # skopeo refuses:
           #
           #   Copying this image would require changing layer representation,
           #   which we cannot do: "Would invalidate signatures"
           #
-          # The copy has to re-encode the layers (the ISO's storage is created
-          # from scratch), and containers/image will not do that to an image
-          # whose signatures are present, because the result would no longer
-          # match them. Verification has already happened, so the attachments
-          # have served their purpose; removing them is the documented
-          # workaround for building ISOs from signed containers. Copying the
-          # image onto itself with --remove-signatures drops just the
-          # attachments, not the image.
-          ref="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
+          # that copy has to re-encode the layers, and containers/image will
+          # not do that to an image whose signatures are present because the
+          # result would no longer match them. The pull above already verified
+          # them, so they have served their purpose.
+          #
+          # Copying to a local reference (rather than stripping signatures in
+          # place) also pins the name the installer sees, so
+          # interactive-defaults.ks never has to guess how the payload ended up
+          # being stored.
+          payload_src="${PAYLOAD_SRC_REF}"
           sudo skopeo copy --remove-signatures \
-            "containers-storage:${ref}" "containers-storage:${ref}"
+            "containers-storage:${PAYLOAD_TARGET_REF}" \
+            "containers-storage:${payload_src}"
 
       - name: Build ISO with image-builder
         id: build
@@ -210,7 +254,7 @@ jobs:
             build \
             --output-dir /output \
             --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
-            --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            --bootc-installer-payload-ref "${PAYLOAD_SRC_REF}" \
             --bootc-default-fs btrfs \
             --progress verbose \
             bootc-generic-iso
