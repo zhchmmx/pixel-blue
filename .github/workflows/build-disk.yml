@@ -107,7 +107,7 @@ jobs:
           rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
   # Install ISO, built with osbuild image-builder (bootc-generic-iso).
-  # The ISO boots the GTK Anaconda installer; it installs the published image
+  # The ISO boots the Anaconda Web UI installer; it installs the published image
   # from a containers-storage copy embedded in the ISO and the Flatpaks from
   # flatpak_refs/ out of the local ostree repo baked into the installer image.
   # Both happen before the first boot and neither needs a network. There is no
