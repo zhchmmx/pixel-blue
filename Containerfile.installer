@@ -171,6 +171,25 @@ RUN version="$(sed -n 's/^VERSION_ID=//p' /usr/lib/os-release)" \
  && test -n "$version" \
  && printf '[Main]\nProduct=Pixel Blue\nVersion=%s\nIsFinal=True\n' "$version" > /.buildstamp
 
+# Anaconda draws its interface on tty6, and tty6 is exactly the VT systemd
+# reserves for autovt@ by default (ReserveVT defaults to 6). "Reserved" means
+# logind starts autovt@ on that VT unconditionally -- and with the autovt@
+# symlink below that is an agetty shell, which takes the tty before the
+# compositor can use it.
+#
+# Measured on the built ISO: anaconda-shell@tty6 started at 20.5s, Anaconda
+# switched to graphical mode at 20.9s, and run-in-new-session was killed by
+# SIGHUP (reported as "exited on signal 1") at 21.5s, without the compositor
+# ever writing a line. Restarting anaconda minutes later works, because by then
+# nothing is holding tty6 any more.
+#
+# Moving the reserved VT to 2 leaves tty6 uncontended. This is the half of the
+# image-builder documentation's recipe that this file used to miss, and it is
+# what upstream changed for F46 (rhinstaller/anaconda#7193); the F44 packages
+# still default to 6.
+RUN mkdir -p /usr/lib/systemd/logind.conf.d \
+ && printf '[Login]\nReserveVT=2\n' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+
 # Take the auto-activated VTs away from getty.
 #
 # logind spawns autovt@ttyN for every VT it activates, and in the base image

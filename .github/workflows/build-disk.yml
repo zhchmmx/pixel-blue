@@ -176,6 +176,9 @@ jobs:
             echo "--- installer session ---"
             grep -q pam_systemd /etc/pam.d/anaconda || { echo "ERROR: /etc/pam.d/anaconda has no pam_systemd -- the kiosk compositor cannot get a logind session"; exit 1; }
             cat /etc/pam.d/anaconda
+            echo "--- vt allocation ---"
+            cat /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+            grep -q "^ReserveVT=2$" /usr/lib/systemd/logind.conf.d/anaconda-shell.conf || { echo "ERROR: ReserveVT is not 2 -- autovt takes tty6 and the compositor dies on SIGHUP"; exit 1; }
             echo "--- install profile ---"
             grep -q "^VARIANT_ID=pixel-blue$" /usr/lib/os-release || { echo "ERROR: VARIANT_ID is not pixel-blue -- Anaconda falls back to the generic profile"; exit 1; }
             grep -q "base_profile = fedora-silverblue" /etc/anaconda/profile.d/pixel-blue.conf || { echo "ERROR: pixel-blue profile missing or not based on fedora-silverblue"; exit 1; }
