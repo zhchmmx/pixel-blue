@@ -100,24 +100,28 @@ RUN /usr/libexec/pixel-blue/build-flatpak-repo.sh \
 # The remote the *installed* system uses afterwards, so updates keep working.
 COPY build_files/installer/10-flatpak.conf /etc/anaconda/conf.d/10-flatpak.conf
 
-# Anaconda cannot preinstall Flatpaks on a bootc payload without help.
+# Anaconda cannot preinstall Flatpaks on a bootc payload at all, and needs two
+# small patches before it can. Both are applied by one script so they are
+# reviewable and fail loudly when anaconda upstream moves the code:
 #
-# It does have a FlatpakManager and an InstallFlatpaksTask in the rpm_ostree
-# payload, and this image satisfies every input it advertises: /flatpak/repo
-# holds the refs, conf.d supplies flatpak_remote, and the FLATPAK source gets
-# registered. What is missing is the ref list itself -- the only code that calls
-# set_flatpak_refs() lives in the DNF payload (payload/dnf/dnf.py), which never
-# runs for a bootc install. With no refs the manager's install() returns at its
-# "no flatpaks are marked for install" guard: no error, no log line, nothing
-# installed. A full install was verified to produce exactly that.
+#   1. The bootc branch of RPMOSTreeModule.install_with_tasks() never builds an
+#      InstallFlatpaksTask. Only the ostree branch does. A bootc install
+#      therefore logs a "Find size of flatpaks" task (the FLATPAK source is
+#      registered, so the payload computes its size) and then installs
+#      nothing -- measured on a full install.
+#   2. InstallFlatpaksTask hands its FlatpakManager no ref list, and on this
+#      payload nothing else supplies one: the only caller of
+#      set_flatpak_refs() anywhere in pyanaconda is the DNF payload. With an
+#      empty list the manager's install() returns at its "no flatpaks are
+#      marked for install" guard, silently.
 #
-# So the one line that feeds the refs is added here, reading the list that
-# build-flatpak-repo.sh derives from the repo. This is the same technique the
-# established ISO builders use (build-container-installer's lorax templates
-# rewrite this very file with `replace`); there is no configuration option for
-# it, as /etc/anaconda/anaconda.conf has no flatpak_refs key.
-RUN sed -i '/flatpak_manager.initialize_with_system_path()/i\        flatpak_manager.set_flatpak_refs(open("/flatpak/refs").read().split())' \
-      /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/flatpak_installation.py
+# The ref list is /flatpak/refs, derived from the repo build-flatpak-repo.sh
+# just produced. This is the same technique the established ISO builders use
+# (build-container-installer's lorax templates rewrite these files with
+# `replace`); anaconda has no configuration option for either behaviour.
+COPY build_files/installer/patch-anaconda-flatpak.py /usr/libexec/pixel-blue/patch-anaconda-flatpak.py
+RUN /usr/libexec/pixel-blue/patch-anaconda-flatpak.py \
+ && rm -f /usr/libexec/pixel-blue/patch-anaconda-flatpak.py
 
 # --- ISO configuration ------------------------------------------------------
 # ISO label, GRUB menu and kernel command line. Only bootc-generic-iso reads
