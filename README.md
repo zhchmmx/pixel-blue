@@ -26,23 +26,28 @@ just run-vm-iso     # boot the ISO in QEMU
 
 The ISO is an **installer**, not a live session: it boots into the graphical
 Anaconda installer, where you pick the target disk and keep the default
-`Automatic` layout — the same path a Fedora Silverblue install takes. Building
-it takes two images:
+`Automatic` layout — the same path a Fedora Silverblue install takes.
 
-- `Containerfile.installer` — the environment Anaconda runs in. Besides Anaconda
-  it carries `/flatpak/repo`, a local Flatpak ostree repo built from
-  `flatpak_refs/`. Anaconda installs every app in it into the target's
-  `/var/lib/flatpak` **during the installation**, so the Flatpaks are there on
-  the first boot — no network, no first-boot script.
-- the published `pixel-blue` image itself, embedded as the install payload.
+It is built with [lorax](https://github.com/weldr/lorax), the tool Fedora and
+RHEL use to produce `boot.iso`. That means the installer environment itself —
+Anaconda, the SELinux contexts, the logind `ReserveVT` drop-in, the
+`anaconda-shell` VT, the dracut modules — comes from lorax, not from this
+repository. `iso/build-iso.sh` adds only what is ours, through the templates in
+`iso/templates/`:
 
-The ISO is produced by [osbuild image-builder](https://github.com/osbuild/image-builder)
-as a `bootc-generic-iso` artifact. Its kernel command line and GRUB menu come
-from `build_files/installer/iso.yaml` (`inst.graphical`), and the payload plus
-the graphical default target from `build_files/installer/interactive-defaults.ks.in`.
-No kickstart is passed, so the installer stays interactive. The builder image is
-selected by `IMAGE_BUILDER_IMAGE` in `image-template.env`; `build-disk.yml`
-prints the digest it resolved, which is what to pin it to.
+- the published `pixel-blue` image, exported as an OCI layout and copied onto
+  the media; the appended kickstart installs it with
+  `ostreecontainer --transport=oci`, then pins it for updates with
+  `bootc switch` in a `%post`
+- `/flatpak/repo`, an ostree repo built from `flatpak_refs/`. Anaconda installs
+  every app in it into the target's `/var/lib/flatpak` **during the
+  installation**, so the Flatpaks are there on the first boot — no network, no
+  first-boot script
+- `iso/pixel-blue.conf`, an Anaconda profile inheriting `fedora-silverblue`,
+  selected by appending `VARIANT_ID=pixel-blue` to the installer's os-release
+
+The install stays interactive because the appended kickstart carries no storage
+directives: the Installation Destination page asks which disk to use.
 
 ## Option 2: Switch to Pixel Blue
 

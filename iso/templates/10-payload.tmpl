@@ -1,0 +1,12 @@
+<%page args="work_dir"/>
+## Put the payload on the install media.
+##
+## Anaconda mounts the ISO at /run/install/repo, so a directory copied to the
+## tree root as /payload is what the kickstart refers to as
+## /run/install/repo/payload.
+##
+## The payload is an OCI layout (oci-layout + index.json + blobs/), not a
+## containers-storage tree: it is just files, so it survives being written to a
+## read-only ISO and needs no container engine at install time.
+runcmd mkdir -p ${root}/payload
+runcmd cp -a ${work_dir}/payload/. ${root}/payload/

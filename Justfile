@@ -8,7 +8,7 @@ export image_keywords := env_var("IMAGE_KEYWORDS")
 export image_logo_url := env_var("IMAGE_LOGO_URL")
 export default_tag := env_var("DEFAULT_TAG")
 export bib_image := env_var("BIB_IMAGE")
-export image_builder_image := env_var("IMAGE_BUILDER_IMAGE")
+export fedora_version := env_var("FEDORA_VERSION")
 
 alias build-vm := build-qcow2
 alias rebuild-vm := rebuild-qcow2
@@ -440,100 +440,48 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build the install ISO with osbuild image-builder (bootc-generic-iso)
+# Build the install ISO with lorax
 #
-# The ISO boots Anaconda with the Web UI; the user picks the disk and keeps the
-# Automatic layout. It installs the published Pixel Blue image from a container
-# copy embedded in the ISO, plus the Flatpaks in flatpak_refs/ out of the local
-# ostree repo baked into the installer image -- both offline, both before the
-# first boot. There is no live desktop: this is an installer.
+# The ISO boots the graphical Anaconda installer; the user picks the disk and
+# keeps the Automatic layout. It installs the published Pixel Blue image from an
+# OCI layout on the media, plus the Flatpaks in flatpak_refs/ out of an ostree
+# repo also on the media -- both offline, both before the first boot. There is
+# no live desktop: this is an installer.
 #
-# $target_image/$tag select the payload image; $payload_image is the published
-# reference, which is what the installed system follows for updates and what
-# interactive-defaults.ks records as the target. The payload is copied to a
-# local reference first because image-builder reads it out of host storage and
-# refuses images that still carry signature attachments.
+# lorax is what Fedora and RHEL use for boot.iso, so the installer environment
+# itself comes from it instead of from this repository; iso/build-iso.sh adds
+# only our payload, our Flatpaks and our Anaconda profile. The stage runs in a
+# fedora container because lorax is a Fedora tool.
+#
+# $payload_image is the published reference: it is what gets installed and what
+# the installed system follows for updates.
 #
 # Example: just build-iso
 [group('Build Virtal Machine Image')]
-build-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_image="": (_rootful_load_image target_image tag)
+build-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag):
     #!/usr/bin/env bash
     set -euox pipefail
 
-    payload_image="${payload_image:-ghcr.io/{{ repo_organization }}/{{ image_name }}:{{ tag }}}"
-
-    # The payload is re-tagged into the host's storage under a local reference
-    # (below), which is what the installer image bakes into
-    # interactive-defaults.ks and what image-builder embeds in the ISO. The
-    # published reference is still recorded as the installed system's update
-    # source, hence two variables.
-    payload_src="localhost/{{ image_name }}-payload:{{ tag }}"
-
-    # Install this repo's containers policy on the host first, so the pull
-    # below enforces the cosign signature instead of trusting anything.
-    sudo install -Dm644 system_files/etc/containers/policy.json \
-      /etc/containers/policy.json
-    sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml \
-      /etc/containers/registries.d/pixel-blue.yaml
-    sudo podman pull "${payload_image}"
-
-    # Drop the signature attachments the pull just stored (registries.d sets
-    # use-sigstore-attachments). image-builder later copies the payload into
-    # the ISO's container storage with skopeo, which refuses to re-encode the
-    # layers of an image whose signatures are attached locally: "Would
-    # invalidate signatures". Verification already happened above, so the
-    # attachments have served their purpose. Copying to a local reference
-    # (rather than stripping in place) also pins the name the installer sees.
-    sudo skopeo copy --remove-signatures \
-      "containers-storage:${payload_image}" "containers-storage:${payload_src}"
-
-    # Installer environment: Anaconda + /flatpak/repo, built from the minimal
-    # fedora-bootc base (see Containerfile.installer). The payload image is
-    # passed separately to image-builder below. Flatpak runs inside this build
-    # (bwrap needs sys_admin), hence the caps.
-    sudo podman build \
-      --cap-add sys_admin \
-      --security-opt label=disable \
-      --build-arg PAYLOAD_SRC_REF="${payload_src}" \
-      --build-arg PAYLOAD_TARGET_REF="${payload_image}" \
-      --tag "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --file Containerfile.installer .
-
-    # image-builder writes into --output-dir; use a scratch dir so a rerun can
-    # never pick up a stale ISO.
-    iso_out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
-    trap 'rm -rf "${iso_out}"' EXIT
     mkdir -p build
-    # Fedora bootc containers do not declare a root filesystem and
-    # image-builder refuses to guess one, so name it explicitly.
-    sudo podman run --rm \
-      --privileged \
-      --pull=newer \
-      --security-opt label=type:unconfined_t \
-      -v "${iso_out}":/output \
-      -v /var/lib/containers/storage:/var/lib/containers/storage \
-      "{{ image_builder_image }}" \
-      build \
-      --output-dir /output \
-      --bootc-ref "localhost/{{ image_name }}-installer:{{ tag }}" \
-      --bootc-installer-payload-ref "${payload_src}" \
-      --bootc-default-fs btrfs \
-      --progress verbose \
-      bootc-generic-iso
+    out="$(mktemp -d -p "${PWD}" -t _build_iso.XXXXXXXXXX)"
+    trap 'rm -rf "${out}"' EXIT
 
-    # The layout under --output-dir is image-builder's business (it nests by
-    # name/type/arch), so find the ISO instead of guessing a path.
-    iso_path="$(find "${iso_out}" -type f -name '*.iso' | head -n1)"
-    if [ -z "${iso_path}" ]; then
-      echo "error: image-builder produced no ISO under ${iso_out}" >&2
-      exit 1
-    fi
-    sudo chown "$(id -u):$(id -g)" "${iso_path}"
-    mv -f "${iso_path}" build/pixel-blue.iso
+    sudo podman run --rm --privileged \
+      -v "${PWD}:/src:ro" \
+      -v "${out}:/out" \
+      -e PAYLOAD_REF="{{ payload_image }}" \
+      -e PAYLOAD_TARGET_REF="{{ payload_image }}" \
+      -e VERSION="{{ fedora_version }}" \
+      -e RELEASE="1" \
+      "registry.fedoraproject.org/fedora:{{ fedora_version }}" \
+      bash /src/iso/build-iso.sh
+
+    sudo chown "$(id -u):$(id -g)" "${out}/pixel-blue.iso"
+    mv -f "${out}/pixel-blue.iso" build/pixel-blue.iso
 
 # Rebuild the live ISO (rebuilds the container image first)
 [group('Build Virtal Machine Image')]
-rebuild-iso $target_image=("localhost/" + image_name) $tag=default_tag payload_image="": (build target_image tag) && (build-iso target_image tag payload_image)
+rebuild-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag): (build) && (build-iso payload_image)
 
 # Rebuild a QCOW2 virtual machine image
 [group('Build Virtal Machine Image')]

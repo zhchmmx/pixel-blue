@@ -1,0 +1,16 @@
+<%page args="target_ref"/>
+## What the installer installs, and what the installed system tracks afterwards.
+##
+## Anaconda reads /usr/share/anaconda/interactive-defaults.ks when the kernel
+## command line carries no inst.ks=, which is how this ISO stays interactive:
+## no storage directives are added, so the Installation Destination page still
+## asks which disk to use.
+##
+## ostreecontainer installs the OCI layout straight off the media. It has no
+## option for the image reference the installed system should follow, so the
+## %post pins it with `bootc switch` -- without that, `bootc upgrade` would have
+## nothing to update from. This is the combination Universal Blue's ISOs use.
+append usr/share/anaconda/interactive-defaults.ks "ostreecontainer --url=/run/install/repo/payload --transport=oci --no-signature-verification"
+append usr/share/anaconda/interactive-defaults.ks "%post"
+append usr/share/anaconda/interactive-defaults.ks "bootc switch --mutate-in-place --transport registry ${target_ref}"
+append usr/share/anaconda/interactive-defaults.ks "%end"

@@ -1,0 +1,10 @@
+<%page args="work_dir"/>
+## Flatpaks that get preinstalled, and the path Anaconda looks for them at.
+##
+## pyanaconda hardcodes file:///flatpak/repo (see rpm_ostree/flatpak_manager.py),
+## so the repo lives on the media under that name and /flatpak points at it.
+## This is the same shape build-container-installer uses for the symlink, and
+## what lorax's lorax-embed-flatpaks.tmpl builds the repo for.
+runcmd mkdir -p ${root}/flatpak
+runcmd cp -a ${work_dir}/flatpak/. ${root}/flatpak/
+symlink /run/install/repo/flatpak /flatpak

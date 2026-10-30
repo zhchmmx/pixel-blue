@@ -1,0 +1,122 @@
+#!/bin/bash
+# Build the Pixel Blue installer ISO with lorax.
+#
+# Runs inside a Fedora container (see .github/workflows/build-disk.yml); it
+# installs its own build dependencies, so the same script also works on a
+# workstation.
+#
+# Why lorax. It is the tool Fedora and RHEL use to produce boot.iso, and it
+# brings the whole installer environment with it: the anaconda packages, the
+# SELinux contexts (it runs setfiles over the tree), the logind ReserveVT
+# drop-in, the anaconda-shell VT plumbing, the dracut modules. This repository
+# used to reimplement all of that by hand in a Containerfile to feed
+# image-builder's bootc-generic-iso, and every one of those pieces broke in a
+# way that cost a build to find.
+#
+# What this script adds on top of a stock lorax run is only what is ours: the
+# payload image, our Flatpas, our Anaconda profile. Everything about *how* the
+# installer runs is lorax's.
+#
+# Environment:
+#   PAYLOAD_REF         image to install, e.g. ghcr.io/zhchmmx/pixel-blue:latest
+#   PAYLOAD_TARGET_REF  reference the installed system follows (default PAYLOAD_REF)
+#   PRODUCT             product name shown by the installer (default "Pixel Blue")
+#   VERSION             Fedora release to build the installer from (default 44)
+#   RELEASE             buildstamp release number (default 1)
+#   VARIANT             release variant lorax installs (default Silverblue)
+#   ARCH                build architecture (default x86_64)
+#   VOLID               ISO volume label, max 32 chars (default Pixel-Blue-Installer)
+#   WORK                scratch dir (default /work)
+#   OUT                 output dir (default /out)
+
+set -euo pipefail
+
+PAYLOAD_REF="${PAYLOAD_REF:?PAYLOAD_REF must be set, e.g. ghcr.io/owner/image:tag}"
+PAYLOAD_TARGET_REF="${PAYLOAD_TARGET_REF:-${PAYLOAD_REF}}"
+PRODUCT="${PRODUCT:-Pixel Blue}"
+VERSION="${VERSION:-44}"
+RELEASE="${RELEASE:-1}"
+VARIANT="${VARIANT:-Silverblue}"
+ARCH="${ARCH:-x86_64}"
+VOLID="${VOLID:-Pixel-Blue-Installer}"
+WORK="${WORK:-/work}"
+OUT="${OUT:-/out}"
+SRC="${SRC:-/src}"
+
+step() { echo; echo "=== $* ==="; }
+
+step "build dependencies"
+dnf install -y --setopt=install_weak_deps=False \
+  lorax lorax-templates-generic skopeo flatpak ostree xorriso isomd5sum
+command -v lorax >/dev/null || { echo "error: lorax not installed" >&2; exit 1; }
+
+mkdir -p "${WORK}" "${OUT}"
+
+step "flatpak repo (what the installer preinstalls)"
+REFS_DIR="${SRC}/flatpak_refs" REPO="${WORK}/flatpak/repo" \
+  bash "${SRC}/iso/build-flatpak-repo.sh"
+test -f "${WORK}/flatpak/repo/summary" || {
+  echo "error: no summary in ${WORK}/flatpak/repo -- Anaconda reads the repo through it" >&2
+  exit 1
+}
+
+step "payload as an OCI layout"
+rm -rf "${WORK}/payload"
+skopeo copy --all "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
+test -f "${WORK}/payload/oci-layout" || {
+  echo "error: ${WORK}/payload is not an OCI layout" >&2
+  exit 1
+}
+du -sh "${WORK}/payload"
+
+step "lorax"
+# lorax takes repositories either as --repo FILES or as -s URLs; the container's
+# own repo files are the simplest source and track the release we build for.
+REPO_ARGS=()
+for repo_file in /etc/yum.repos.d/*.repo; do
+  REPO_ARGS+=(--repo "${repo_file}")
+done
+if [ "${#REPO_ARGS[@]}" -eq 0 ]; then
+  echo "error: no /etc/yum.repos.d/*.repo to build the installer from" >&2
+  exit 1
+fi
+
+lorax \
+  --product "${PRODUCT}" \
+  --version "${VERSION}" \
+  --release "${RELEASE}" \
+  --variant "${VARIANT}" \
+  --buildarch "${ARCH}" \
+  --volid "${VOLID}" \
+  --isfinal \
+  --sharedir /usr/share/lorax/templates.d/99-generic \
+  --add-template "${SRC}/iso/templates/10-payload.tmpl" \
+  --add-template "${SRC}/iso/templates/15-flatpak.tmpl" \
+  --add-template "${SRC}/iso/templates/20-ks.tmpl" \
+  --add-template "${SRC}/iso/templates/30-branding.tmpl" \
+  --add-template-var "work_dir=${WORK}" \
+  --add-template-var "target_ref=${PAYLOAD_TARGET_REF}" \
+  --add-template-var "profile_src=${SRC}/iso" \
+  "${REPO_ARGS[@]}" \
+  "${OUT}/lorax"
+
+ISO="${OUT}/lorax/images/boot.iso"
+test -f "${ISO}" || { echo "error: lorax produced no ${ISO}" >&2; exit 1; }
+
+step "verify the media actually carries what the kickstart asks for"
+fail=0
+xorriso -indev "${ISO}" -ls /payload 2>/dev/null | head -5 || fail=1
+if ! xorriso -indev "${ISO}" -find /payload -maxdepth 1 2>/dev/null | grep -q payload; then
+  echo "error: no /payload on the ISO -- the payload template did not run (check the lorax log above)" >&2
+  fail=1
+fi
+if ! xorriso -indev "${ISO}" -find /flatpak -maxdepth 1 2>/dev/null | grep -q flatpak; then
+  echo "error: no /flatpak on the ISO -- the flatpak template did not run" >&2
+  fail=1
+fi
+[ "${fail}" -eq 0 ] || exit 1
+
+step "result"
+cp "${ISO}" "${OUT}/pixel-blue.iso"
+ls -lh "${OUT}/pixel-blue.iso"
+echo "iso-path=${OUT}/pixel-blue.iso"
