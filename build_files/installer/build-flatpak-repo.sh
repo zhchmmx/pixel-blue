@@ -64,3 +64,14 @@ if [ "${apps}" -eq 0 ]; then
   exit 1
 fi
 echo "exported ${apps} app refs into ${REPO}"
+
+# The ref list Anaconda's own code never supplies.
+#
+# On the bootc/ostree payload, nothing ever calls FlatpakManager.set_flatpak_refs()
+# -- the only caller in pyanaconda is the DNF payload (payload/dnf/dnf.py). Without
+# refs the manager's install() hits its "no flatpaks are marked for install" guard
+# and returns silently, so the installation finishes with nothing installed and no
+# log line to show for it. Containerfile.installer patches that task to read this
+# file; taking the list from the repo keeps the two from drifting apart.
+ostree --repo="${REPO}" refs | grep '^app/' > /flatpak/refs
+echo "wrote $(wc -l < /flatpak/refs) refs to /flatpak/refs"

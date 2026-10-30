@@ -100,6 +100,25 @@ RUN /usr/libexec/pixel-blue/build-flatpak-repo.sh \
 # The remote the *installed* system uses afterwards, so updates keep working.
 COPY build_files/installer/10-flatpak.conf /etc/anaconda/conf.d/10-flatpak.conf
 
+# Anaconda cannot preinstall Flatpaks on a bootc payload without help.
+#
+# It does have a FlatpakManager and an InstallFlatpaksTask in the rpm_ostree
+# payload, and this image satisfies every input it advertises: /flatpak/repo
+# holds the refs, conf.d supplies flatpak_remote, and the FLATPAK source gets
+# registered. What is missing is the ref list itself -- the only code that calls
+# set_flatpak_refs() lives in the DNF payload (payload/dnf/dnf.py), which never
+# runs for a bootc install. With no refs the manager's install() returns at its
+# "no flatpaks are marked for install" guard: no error, no log line, nothing
+# installed. A full install was verified to produce exactly that.
+#
+# So the one line that feeds the refs is added here, reading the list that
+# build-flatpak-repo.sh derives from the repo. This is the same technique the
+# established ISO builders use (build-container-installer's lorax templates
+# rewrite this very file with `replace`); there is no configuration option for
+# it, as /etc/anaconda/anaconda.conf has no flatpak_refs key.
+RUN sed -i '/flatpak_manager.initialize_with_system_path()/i\        flatpak_manager.set_flatpak_refs(open("/flatpak/refs").read().split())' \
+      /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/flatpak_installation.py
+
 # --- ISO configuration ------------------------------------------------------
 # ISO label, GRUB menu and kernel command line. Only bootc-generic-iso reads
 # this file. The label must match inst.stage2=hd:LABEL= inside it.
