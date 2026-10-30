@@ -1,7 +1,9 @@
 # GRUB menu and kernel command line for the installer ISO.
 #
-# image-builder reads this only for the bootc-generic-iso type, and this is
-# where the installer's mode is decided:
+# image-builder reads this only for the bootc-generic-iso type. Two things are
+# decided here: how the installer runs, and -- because Anaconda derives the
+# installed system's kernel arguments partly from this line -- what the finished
+# system ends up with.
 #
 #   * label must match inst.stage2=hd:LABEL= below, and fit in 32 characters
 #   * inst.graphical is explicit: without it the display mode follows the
@@ -10,20 +12,31 @@
 #     /usr/share/anaconda/interactive-defaults.ks for the payload and the
 #     graphical target, leaving the disk choice to the user
 #
-# Kernel arguments for the installed system do NOT belong here. Anaconda
-# computes them in collect_arguments() from five sources -- kickstart
-# bootloader --append, storage, conf.bootloader.preserved_arguments, the
-# graphical-boot heuristic and the SELinux state -- and only the third reads
-# this command line, for the names listed in that configuration key. Writing
-# rhgb/quiet here would therefore do nothing, while console= and selinux= did
-# leak (the former through preserved_arguments, the latter because a disabled
-# installer makes Anaconda disable the target as well).
+# The two SELinux switches do different jobs and both are needed:
 #
-# The installed system's arguments live in interactive-defaults.ks instead.
+#   selinux=0       picked up by the kernel AND by Anaconda. It turns SELinux
+#                   off in the *install environment*, which is mandatory here:
+#                   this image boots from a read-only squashfs that was never
+#                   relabeled, so enabling SELinux makes systemd fail to apply
+#                   security contexts to /dev and /run, give up with "Failed to
+#                   allocate manager object" and freeze before anything runs.
+#
+#   inst.selinux=1  an Anaconda-only option that sets the state of the
+#                   *installed* system. Without it the target comes out with
+#                   SELinux off: collect_arguments() has a
+#                   _set_security_boot_args() step that appends selinux=0 to the
+#                   target whenever the installer itself runs with SELinux
+#                   disabled, so turning it off here would turn it off there.
+#
+# Nothing else belongs on this line. console= in particular must not appear:
+# conf.bootloader.preserved_arguments lists it, and Anaconda copies the listed
+# arguments onto the installed system. Kernel arguments the target needs for its
+# own sake (rhgb, quiet) are declared in interactive-defaults.ks through
+# `bootloader --append`, which reaches bootc as --karg without any such filter.
 label: "Pixel-Blue-Installer"
 grub2:
   timeout: 10
   entries:
     - name: "Install Pixel Blue"
-      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer inst.graphical"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer inst.graphical selinux=0 inst.selinux=1"
       initrd: "/images/pxeboot/initrd.img"
