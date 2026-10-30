@@ -1,26 +1,23 @@
 #!/usr/bin/python3
 """Teach Anaconda 44 to preinstall the ISO's Flatpaks on a bootc payload.
 
-Two changes, both required, both checked against anaconda 44.30:
+One change, and it is the whole fix: the bootc branch of
+RPMOSTreeModule.install_with_tasks() never builds an InstallFlatpaksTask. The
+ostree branch does; the bootc branch, written later, simply does not carry those
+four lines. Without them the refs are never installed, and nothing is logged
+either -- the payload only runs a "Find size of flatpaks" task because a FLATPAK
+source was registered.
 
-1. rpm_ostree.py -- the bootc branch of install_with_tasks() never builds an
-   InstallFlatpaksTask. The ostree branch does; the bootc branch, written
-   later, simply does not carry those four lines. Without them the refs are
-   never installed no matter what else is configured, and nothing is logged
-   either: the payload only runs a "Find size of flatpaks" task because a
-   FLATPAK source was registered.
+Nothing else needs patching. The rpm_ostree FlatpakManager works out what to
+install by itself: install_all() walks RemoteRefsList, which calls
+`list_remote_refs_sync("Anaconda")` against the local repo at
+file:///flatpak/repo, then adds every non-runtime ref to the transaction.
+(`set_flatpak_refs` belongs to the *other* FlatpakManager, in
+payload/flatpak/, and calling it on this one is an AttributeError -- which is
+how the first version of this patch failed.)
 
-2. flatpak_installation.py -- InstallFlatpaksTask builds its FlatpakManager
-   without a ref list, and on this payload nothing else supplies one: the only
-   caller of set_flatpak_refs() in pyanaconda is the DNF payload. With an empty
-   list the manager's install() returns at its "no flatpaks are marked for
-   install" guard -- silently, no error, no log line.
-
-The ref list is /flatpak/refs, written by build-flatpak-repo.sh from the repo it
-just built, so the list and the repo cannot drift apart.
-
-Both patches assert that they match exactly once, so an anaconda update that
-moves the code fails the build instead of silently doing nothing.
+The patch asserts that it matches exactly once, so an anaconda update that moves
+the code fails the build instead of silently doing nothing.
 
 Usage: patch-anaconda-flatpak.py [ROOT]
 ROOT is only for testing; it prefixes the absolute paths.
@@ -35,12 +32,7 @@ RPM_OSTREE = (
     "/usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/"
     "payload/rpm_ostree/rpm_ostree.py"
 )
-FLATPAK_INSTALLATION = (
-    "/usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/"
-    "payload/rpm_ostree/flatpak_installation.py"
-)
 
-# 1. Give the bootc branch the same flatpak task the ostree branch has.
 BOOTC_OLD = """        if isinstance(data, BootcConfigurationData):
             return self._install_with_tasks_bootc(data)"""
 
@@ -50,14 +42,6 @@ BOOTC_NEW = """        if isinstance(data, BootcConfigurationData):
             if flatpak_source:
                 tasks.append(InstallFlatpaksTask(sysroot=conf.target.system_root))
             return tasks"""
-
-# 2. Hand the manager the ref list it never gets.
-REFS_OLD = "        flatpak_manager.initialize_with_system_path()"
-
-REFS_NEW = (
-    '        flatpak_manager.set_flatpak_refs(open("/flatpak/refs").read().split())\n'
-    "        flatpak_manager.initialize_with_system_path()"
-)
 
 
 def patch(pattern, old, new):
@@ -82,4 +66,3 @@ def patch(pattern, old, new):
 
 
 patch(RPM_OSTREE, BOOTC_OLD, BOOTC_NEW)
-patch(FLATPAK_INSTALLATION, REFS_OLD, REFS_NEW)

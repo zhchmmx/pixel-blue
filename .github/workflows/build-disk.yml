@@ -180,11 +180,8 @@ jobs:
             cat /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
             grep -q "^ReserveVT=2$" /usr/lib/systemd/logind.conf.d/anaconda-shell.conf || { echo "ERROR: ReserveVT is not 2 -- autovt takes tty6 and the compositor dies on SIGHUP"; exit 1; }
             echo "--- flatpak preinstall ---"
-            test -s /flatpak/refs || { echo "ERROR: /flatpak/refs is empty -- the flatpak task would install nothing"; exit 1; }
-            wc -l < /flatpak/refs
-            grep -c "set_flatpak_refs" /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/flatpak_installation.py || { echo "ERROR: the ref-injection patch is missing"; exit 1; }
             grep -c "tasks.append(InstallFlatpaksTask" /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/rpm_ostree.py || { echo "ERROR: the bootc flatpak task patch is missing"; exit 1; }
-            python3 -m py_compile /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/flatpak_installation.py /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/rpm_ostree.py && echo "patched payload modules compile"
+            python3 -m py_compile /usr/lib64/python3*/site-packages/pyanaconda/modules/payloads/payload/rpm_ostree/rpm_ostree.py && echo "patched payload module compiles"
             echo "--- install profile ---"
             grep -q "^VARIANT_ID=pixel-blue$" /usr/lib/os-release || { echo "ERROR: VARIANT_ID is not pixel-blue -- Anaconda falls back to the generic profile"; exit 1; }
             grep -q "base_profile = fedora-silverblue" /etc/anaconda/profile.d/pixel-blue.conf || { echo "ERROR: pixel-blue profile missing or not based on fedora-silverblue"; exit 1; }

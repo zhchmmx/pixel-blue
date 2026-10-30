@@ -100,25 +100,22 @@ RUN /usr/libexec/pixel-blue/build-flatpak-repo.sh \
 # The remote the *installed* system uses afterwards, so updates keep working.
 COPY build_files/installer/10-flatpak.conf /etc/anaconda/conf.d/10-flatpak.conf
 
-# Anaconda cannot preinstall Flatpaks on a bootc payload at all, and needs two
-# small patches before it can. Both are applied by one script so they are
-# reviewable and fail loudly when anaconda upstream moves the code:
+# Anaconda cannot preinstall Flatpaks on a bootc payload, and needs one small
+# patch before it can: the bootc branch of RPMOSTreeModule.install_with_tasks()
+# never builds an InstallFlatpaksTask. Only the ostree branch does. A bootc
+# install therefore logs a "Find size of flatpaks" task (the FLATPAK source is
+# registered, so the payload computes its size) and then installs nothing --
+# measured on a full install.
 #
-#   1. The bootc branch of RPMOSTreeModule.install_with_tasks() never builds an
-#      InstallFlatpaksTask. Only the ostree branch does. A bootc install
-#      therefore logs a "Find size of flatpaks" task (the FLATPAK source is
-#      registered, so the payload computes its size) and then installs
-#      nothing -- measured on a full install.
-#   2. InstallFlatpaksTask hands its FlatpakManager no ref list, and on this
-#      payload nothing else supplies one: the only caller of
-#      set_flatpak_refs() anywhere in pyanaconda is the DNF payload. With an
-#      empty list the manager's install() returns at its "no flatpaks are
-#      marked for install" guard, silently.
+# Nothing else needs touching: the rpm_ostree FlatpakManager enumerates
+# file:///flatpak/repo through list_remote_refs_sync() and installs every
+# non-runtime ref it finds, so no ref list has to be supplied. The patch is
+# applied by a script that asserts its anchor matches exactly once, so an
+# anaconda update fails the build instead of silently doing nothing.
 #
-# The ref list is /flatpak/refs, derived from the repo build-flatpak-repo.sh
-# just produced. This is the same technique the established ISO builders use
+# This is the same technique the established ISO builders use
 # (build-container-installer's lorax templates rewrite these files with
-# `replace`); anaconda has no configuration option for either behaviour.
+# `replace`); anaconda has no configuration option for it.
 COPY build_files/installer/patch-anaconda-flatpak.py /usr/libexec/pixel-blue/patch-anaconda-flatpak.py
 # Run it through python3 rather than relying on the executable bit: this
 # repository is developed on Windows, where git does not record file modes
