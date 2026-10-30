@@ -95,6 +95,7 @@ lorax \
   --add-template "${SRC}/iso/templates/30-branding.tmpl" \
   --add-template-var "target_ref=${PAYLOAD_TARGET_REF}" \
   --add-template-var "profile_src=${SRC}/iso" \
+  --install langtable \
   "${REPO_ARGS[@]}" \
   "${OUT}/lorax"
 
