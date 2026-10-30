@@ -81,6 +81,20 @@ if [ "${#REPO_ARGS[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# Fedora containers filter RPM language files, including in Lorax's installroot.
+# Restore the builder's configuration on exit, even if the build fails.
+language_macro=/etc/rpm/macros.image-language-conf
+if [ -f "${language_macro}" ]; then
+  language_backup=$(mktemp -d "${WORK}/lorax-language-macros.XXXXXX")
+  trap '
+    if [ -f "${language_backup}/macros.image-language-conf" ]; then
+      mv -- "${language_backup}/macros.image-language-conf" "${language_macro}"
+    fi
+    rmdir -- "${language_backup}"
+  ' EXIT
+  mv -- "${language_macro}" "${language_backup}/macros.image-language-conf"
+fi
+
 lorax \
   --product "${PRODUCT}" \
   --version "${VERSION}" \
@@ -95,7 +109,6 @@ lorax \
   --add-template "${SRC}/iso/templates/30-branding.tmpl" \
   --add-template-var "target_ref=${PAYLOAD_TARGET_REF}" \
   --add-template-var "profile_src=${SRC}/iso" \
-  --install langtable \
   "${REPO_ARGS[@]}" \
   "${OUT}/lorax"
 
