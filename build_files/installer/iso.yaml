@@ -1,12 +1,7 @@
 # GRUB menu and kernel command line for the installer ISO.
 #
-# image-builder reads this only for the bootc-generic-iso type. This one line
-# decides two things at once, because bootc's install completion
-# (reconcile_kargs) copies it onto the *installed* system -- everything except
-# inst.* arguments, which are consumed by Anaconda and filtered out.
-#
-# So the rule for this line is: it is the kernel command line of the finished
-# system, plus the inst.* switches the installer needs.
+# image-builder reads this only for the bootc-generic-iso type, and this is
+# where the installer's mode is decided:
 #
 #   * label must match inst.stage2=hd:LABEL= below, and fit in 32 characters
 #   * inst.graphical is explicit: without it the display mode follows the
@@ -14,23 +9,21 @@
 #   * no inst.ks=: without it Anaconda runs interactively and reads
 #     /usr/share/anaconda/interactive-defaults.ks for the payload and the
 #     graphical target, leaving the disk choice to the user
-#   * rhgb quiet are the target system's arguments: plymouth's graphical splash
-#     and a kernel that keeps quiet while it runs
 #
-# Nothing else belongs here. An earlier build carried console=tty0 and
-# selinux=0 on this line and both landed on the installed system -- SELinux came
-# out disabled there. Arguments the installer alone needs must either be inst.*
-# or not exist at all.
+# Kernel arguments for the installed system do NOT belong here. Anaconda
+# computes them in collect_arguments() from five sources -- kickstart
+# bootloader --append, storage, conf.bootloader.preserved_arguments, the
+# graphical-boot heuristic and the SELinux state -- and only the third reads
+# this command line, for the names listed in that configuration key. Writing
+# rhgb/quiet here would therefore do nothing, while console= and selinux= did
+# leak (the former through preserved_arguments, the latter because a disabled
+# installer makes Anaconda disable the target as well).
 #
-# SELinux in the install environment is a non-issue: Anaconda's option
-# documentation states it runs there in permissive mode by default and that
-# "disabling it there does not make much sense". Note also that inst.selinux=0
-# and noselinux disable SELinux in the *installed* system, which is the opposite
-# of what a leak guard wants.
+# The installed system's arguments live in interactive-defaults.ks instead.
 label: "Pixel-Blue-Installer"
 grub2:
   timeout: 10
   entries:
     - name: "Install Pixel Blue"
-      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer inst.graphical rhgb quiet"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer inst.graphical"
       initrd: "/images/pxeboot/initrd.img"
