@@ -90,33 +90,48 @@ lorax \
   --volid "${VOLID}" \
   --isfinal \
   --sharedir /usr/share/lorax/templates.d/99-generic \
-  --add-template "${SRC}/iso/templates/10-payload.tmpl" \
   --add-template "${SRC}/iso/templates/15-flatpak.tmpl" \
   --add-template "${SRC}/iso/templates/20-ks.tmpl" \
   --add-template "${SRC}/iso/templates/30-branding.tmpl" \
-  --add-template-var "work_dir=${WORK}" \
   --add-template-var "target_ref=${PAYLOAD_TARGET_REF}" \
   --add-template-var "profile_src=${SRC}/iso" \
   "${REPO_ARGS[@]}" \
   "${OUT}/lorax"
 
-ISO="${OUT}/lorax/images/boot.iso"
-test -f "${ISO}" || { echo "error: lorax produced no ${ISO}" >&2; exit 1; }
+BOOT_ISO="${OUT}/lorax/images/boot.iso"
+test -f "${BOOT_ISO}" || { echo "error: lorax produced no ${BOOT_ISO}" >&2; exit 1; }
+
+step "add the install sources to the media"
+# lorax assembles the ISO from its own product template (x86.tmpl), which lists
+# what goes at the ISO root; the add-templates above only reach the installer's
+# root filesystem, i.e. the squashfs. mkksiso is the tool lorax ships for this:
+# it copies extra directories to the ISO root -- reachable as
+# /run/install/repo/<name>, which is what the kickstart asks for -- and re-runs
+# implantisomd5, without which the media check fails on boot.
+FINAL="${OUT}/pixel-blue.iso"
+mkksiso \
+  --add "${WORK}/payload" \
+  --add "${WORK}/flatpak" \
+  "${BOOT_ISO}" "${FINAL}"
+test -f "${FINAL}" || { echo "error: mkksiso produced no ${FINAL}" >&2; exit 1; }
 
 step "verify the media actually carries what the kickstart asks for"
 fail=0
-xorriso -indev "${ISO}" -ls /payload 2>/dev/null | head -5 || fail=1
-if ! xorriso -indev "${ISO}" -find /payload -maxdepth 1 2>/dev/null | grep -q payload; then
-  echo "error: no /payload on the ISO -- the payload template did not run (check the lorax log above)" >&2
+if xorriso -indev "${FINAL}" -ls /payload 2>/dev/null | grep -q oci-layout; then
+  echo "ok: /payload is an OCI layout at the ISO root"
+else
+  echo "error: no OCI layout at /payload on the ISO -- the kickstart would find nothing to install" >&2
   fail=1
 fi
-if ! xorriso -indev "${ISO}" -find /flatpak -maxdepth 1 2>/dev/null | grep -q flatpak; then
-  echo "error: no /flatpak on the ISO -- the flatpak template did not run" >&2
+if xorriso -indev "${FINAL}" -ls /flatpak/repo 2>/dev/null | grep -q summary; then
+  echo "ok: /flatpak/repo carries a summary Anaconda can read"
+else
+  echo "error: /flatpak/repo is missing on the ISO -- Anaconda would preinstall nothing" >&2
   fail=1
 fi
 [ "${fail}" -eq 0 ] || exit 1
 
 step "result"
-cp "${ISO}" "${OUT}/pixel-blue.iso"
-ls -lh "${OUT}/pixel-blue.iso"
-echo "iso-path=${OUT}/pixel-blue.iso"
+du -sh "${WORK}/payload" "${WORK}/flatpak" "${BOOT_ISO}" || true
+ls -lh "${FINAL}"
+echo "iso-path=${FINAL}"

@@ -1,10 +1,13 @@
-<%page args="work_dir"/>
-## Flatpaks that get preinstalled, and the path Anaconda looks for them at.
+## The path Anaconda looks for the preinstalled Flatpaks at.
 ##
 ## pyanaconda hardcodes file:///flatpak/repo (see rpm_ostree/flatpak_manager.py),
-## so the repo lives on the media under that name and /flatpak points at it.
-## This is the same shape build-container-installer uses for the symlink, and
-## what lorax's lorax-embed-flatpaks.tmpl builds the repo for.
-runcmd mkdir -p ${root}/flatpak
-runcmd cp -a ${work_dir}/flatpak/. ${root}/flatpak/
+## so the installer's root gets a /flatpak symlink pointing at the copy that
+## mkksiso puts at the ISO root. The repo itself cannot be shipped from inside
+## the installer's root filesystem: it is an install source, and Anaconda mounts
+## the media at /run/install/repo.
+##
+## Note the git history -- this file used to `cp -a` the repo into ${root} as
+## well, which put it inside the squashfs where the kickstart would never find
+## it. Templates reach the installer's root, not the ISO root; that is what
+## mkksiso is for.
 symlink /run/install/repo/flatpak /flatpak
