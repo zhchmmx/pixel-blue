@@ -1,0 +1,20 @@
+<%page args="profile_src"/>
+## What the installer calls itself, and which Anaconda profile it uses.
+##
+## pixel-blue.conf inherits fedora-silverblue, which is what keeps the
+## installation summary to the Silverblue set of spokes and its stylesheet, and
+## what makes automatic partitioning match a bootc system (see the file itself
+## for why the /var subvolume had to go).
+##
+## The two os-release keys are what select that profile: Anaconda matches
+## /etc/os-release against /etc/anaconda/profile.d/*.conf, and
+## variant_id=pixel-blue is a value no upstream profile claims. Appending wins
+## over the Silverblue release package's own VARIANT_ID because os-release
+## parsers take the last assignment.
+##
+## The product name and version on the window and in the buildstamp come from
+## lorax's --product/--version/--isfinal, not from here.
+runcmd mkdir -p ${root}/etc/anaconda/profile.d
+runcmd cp -a ${profile_src}/pixel-blue.conf ${root}/etc/anaconda/profile.d/pixel-blue.conf
+append usr/lib/os-release "VARIANT=\"Pixel Blue\""
+append usr/lib/os-release "VARIANT_ID=pixel-blue"

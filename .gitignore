@@ -8,3 +8,7 @@ _build-*/**
 
 # AI Agents
 .workbuddy
+
+# Python bytecode from local checks
+__pycache__/
+*.pyc
