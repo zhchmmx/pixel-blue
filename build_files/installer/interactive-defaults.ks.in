@@ -16,8 +16,24 @@
 # picks graphical when it can prove the target has a graphical login manager
 # and falls back to multi-user.target otherwise, i.e. a console-only system.
 #
+# `bootloader --append` is the only reliable way to get kernel arguments onto
+# the installed system with a bootc payload. Anaconda assembles them in
+# collect_arguments() from five sources, and the one that looks obvious -- its
+# rhgb/quiet heuristic -- never fires here: it asks the *target's* rpm database
+# whether plymouth is installed, and Anaconda collects the arguments before
+# bootc has deployed anything, so the database is empty. bootloader --append is
+# the unconditional source, and Anaconda turns its contents into
+# `bootc install --karg=` arguments. Without rhgb, plymouthd runs in text mode
+# and the boot ends up as scrolling text instead of the splash.
+#
+# Do not add --location=none to "avoid touching the bootloader": it switches the
+# bootloader mode to SKIPPED, and CollectKernelArgumentsTask returns before
+# collecting anything, so these arguments would be dropped along with it.
+#
 # No storage directives on purpose: that is what makes Anaconda show the
 # Installation Destination page and let the user pick the disk.
 bootc --source-imgref containers-storage:@PAYLOAD_SRC@ --target-imgref @PAYLOAD_TARGET@
+
+bootloader --append="rhgb quiet"
 
 xconfig --startxonboot
