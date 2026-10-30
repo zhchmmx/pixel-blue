@@ -481,7 +481,7 @@ build-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":
 
 # Rebuild the live ISO (rebuilds the container image first)
 [group('Build Virtal Machine Image')]
-rebuild-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag): (build) && (build-iso payload_image)
+rebuild-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag): build && (build-iso payload_image)
 
 # Rebuild a QCOW2 virtual machine image
 [group('Build Virtal Machine Image')]
