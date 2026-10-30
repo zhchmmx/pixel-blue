@@ -4,14 +4,28 @@
 # where the installer's mode is decided:
 #
 #   * label must match inst.stage2=hd:LABEL= below, and fit in 32 characters
-#   * console= on its own implies inst.text, so inst.graphical is explicit
+#   * inst.graphical is explicit: without it the display mode follows the
+#     target's default, and console= on its own would imply inst.text
 #   * no inst.ks=: without it Anaconda runs interactively and reads
 #     /usr/share/anaconda/interactive-defaults.ks for the payload and the
 #     graphical target, leaving the disk choice to the user
+#
+# Nothing else belongs on this line. Every argument here is also handed to the
+# *installed* system by bootc's install completion (reconcile_kargs): an install
+# was measured coming out with this line's console= and selinux=0 on the target,
+# which left SELinux disabled there. Arguments the target needs are declared in
+# the payload image instead (system_files/usr/lib/bootc/kargs.d/), so the two
+# channels stay separate and nothing leaks by accident.
+#
+# SELinux in the install environment is a non-issue: Anaconda's own option
+# documentation says SELinux runs there in permissive mode by default and that
+# "disabling it there does not make much sense". Note also that inst.selinux=0
+# and noselinux would disable SELinux in the *installed* system, which is the
+# opposite of what a leak guard wants.
 label: "Pixel-Blue-Installer"
 grub2:
   timeout: 10
   entries:
     - name: "Install Pixel Blue"
-      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer console=tty0 inst.graphical selinux=0 rhgb quiet"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=Pixel-Blue-Installer inst.graphical"
       initrd: "/images/pxeboot/initrd.img"

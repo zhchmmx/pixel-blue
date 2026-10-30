@@ -330,6 +330,10 @@ jobs:
             echo "::error::inst.text present -- the installer would run as a TUI"
             exit 1
           fi
+          if grep -qE 'selinux=|console=' "${work}/grub.cfg"; then
+            echo "::error::selinux=/console= on the installer command line leak into the installed system"
+            exit 1
+          fi
           if ! grep -q 'inst\.stage2=hd:LABEL=Pixel-Blue-Installer' "${work}/grub.cfg"; then
             echo "::error::inst.stage2 does not match the label in build_files/installer/iso.yaml"
             exit 1
