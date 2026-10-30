@@ -14,3 +14,11 @@ append usr/share/anaconda/interactive-defaults.ks "ostreecontainer --url=/run/in
 append usr/share/anaconda/interactive-defaults.ks "%post"
 append usr/share/anaconda/interactive-defaults.ks "bootc switch --mutate-in-place --transport registry ${target_ref}"
 append usr/share/anaconda/interactive-defaults.ks "%end"
+
+## Pin the installed system to graphical.target.
+##
+## Left alone, Anaconda picks the default target itself and can settle on
+## multi-user, which installs fine and boots straight to a console. That is not
+## a payload problem -- the same image switched to with `bootc switch` comes up
+## graphical -- it is Anaconda's choice for a fresh install.
+append usr/share/anaconda/interactive-defaults.ks "xconfig --startxonboot"
