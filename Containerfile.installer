@@ -120,7 +120,11 @@ COPY build_files/installer/10-flatpak.conf /etc/anaconda/conf.d/10-flatpak.conf
 # (build-container-installer's lorax templates rewrite these files with
 # `replace`); anaconda has no configuration option for either behaviour.
 COPY build_files/installer/patch-anaconda-flatpak.py /usr/libexec/pixel-blue/patch-anaconda-flatpak.py
-RUN /usr/libexec/pixel-blue/patch-anaconda-flatpak.py \
+# Run it through python3 rather than relying on the executable bit: this
+# repository is developed on Windows, where git does not record file modes
+# (core.filemode=false), so a script committed as 100644 arrives here
+# non-executable and the build dies with "Permission denied".
+RUN python3 /usr/libexec/pixel-blue/patch-anaconda-flatpak.py \
  && rm -f /usr/libexec/pixel-blue/patch-anaconda-flatpak.py
 
 # --- ISO configuration ------------------------------------------------------
