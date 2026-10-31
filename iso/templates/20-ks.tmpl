@@ -9,10 +9,18 @@
 ## ostreecontainer installs the OCI layout straight off the media. It has no
 ## option for the image reference the installed system should follow, so the
 ## %post pins it with `bootc switch` -- without that, `bootc upgrade` would have
-## nothing to update from. This is the combination Universal Blue's ISOs use.
+## nothing to update from.
+##
+## --enforce-container-sigpolicy is what turns the origin into
+## ostree-image-signed:docker:// instead of ostree-unverified-registry:, i.e.
+## every later update is verified against the policy and key shipped in the
+## payload. --mutate-in-place only rewrites the origin, so this runs offline at
+## install time; that is the combination Bazzite's ISO ships. The initial
+## install is still unverified -- it comes off the media -- which is why the
+## ISO's own checksum is the thing worth publishing.
 append usr/share/anaconda/interactive-defaults.ks "ostreecontainer --url=/run/install/repo/payload --transport=oci --no-signature-verification"
 append usr/share/anaconda/interactive-defaults.ks "%post --erroronfail"
-append usr/share/anaconda/interactive-defaults.ks "bootc switch --mutate-in-place --transport registry ${target_ref}"
+append usr/share/anaconda/interactive-defaults.ks "bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry ${target_ref}"
 append usr/share/anaconda/interactive-defaults.ks "%end"
 
 ## Pin the installed system to graphical.target.

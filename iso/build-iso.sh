@@ -61,13 +61,31 @@ test -f "${WORK}/flatpak/repo/summary" || {
 }
 
 step "payload as an OCI layout"
+# Verify the payload's cosign signature while pulling it. The repository's own
+# policy and key go in at the paths that policy names, so skopeo checks the
+# .sig attachment against them. Left alone, the Fedora container's default
+# policy (insecureAcceptAnything) accepts anything, and the ISO carries an
+# unverified payload however it was published -- a check the pre-lorax build
+# did have, by pulling with podman on a host primed with this same policy.
+install -Dm644 "${SRC}/system_files/etc/containers/policy.json" \
+  /etc/containers/policy.json
+install -Dm644 "${SRC}/system_files/etc/containers/registries.d/pixel-blue.yaml" \
+  /etc/containers/registries.d/pixel-blue.yaml
+install -Dm644 "${SRC}/system_files/etc/pki/containers/pixel-blue.pub" \
+  /etc/pki/containers/pixel-blue.pub
+
 rm -rf "${WORK}/payload"
-skopeo copy --all "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
+# No --all: the installer is x86_64-only, and copying every platform in an
+# index interacts with signature verification in ways not worth relying on.
+skopeo copy "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
 test -f "${WORK}/payload/oci-layout" || {
   echo "error: ${WORK}/payload is not an OCI layout" >&2
   exit 1
 }
 du -sh "${WORK}/payload"
+# Leave the digest in the log: it is the only record of what this ISO carries.
+skopeo inspect --format 'payload digest: {{.Digest}}' \
+  "docker://${PAYLOAD_REF}" || true
 
 step "lorax"
 # lorax takes repositories either as --repo FILES or as -s URLs; the container's
