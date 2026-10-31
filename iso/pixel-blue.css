@@ -1,0 +1,37 @@
+/* Pixel Blue branding for the Anaconda GTK installer.
+ *
+ * How this gets loaded: Anaconda applies /usr/share/anaconda/anaconda-gtk.css
+ * at GTK_STYLE_PROVIDER_PRIORITY_APPLICATION, then conf.ui.custom_stylesheet at
+ * +15 (pyanaconda/ui/gui/__init__.py). Because a later provider wins, simply
+ * redefining the colours the base stylesheet refers to is enough -- nothing in
+ * anaconda has to be patched.
+ *
+ * The colours come from pixel-blue.png: #3584e4 is ~80% of the mark, #2f63a9
+ * is its darker half. The sidebar uses the dark one so white text stays
+ * readable; selections use the bright one so they stand out against it.
+ */
+
+/* Base stylesheet: .logo-sidebar { background-color: @anaconda_bg_color; }
+ * and AnacondaSpokeWindow #nav-box take their background from this name. */
+@define-color anaconda_bg_color #2f63a9;
+
+/* Selection/active colour, one step brighter than the sidebar. */
+@define-color theme_selected_bg_color #3584e4;
+@define-color theme_selected_fg_color #ffffff;
+
+/* The sidebar is drawn as background + logo + product logo. Upstream leaves
+ * .product-logo empty on purpose ("intended to be overridden by a stylesheet
+ * in product.img") -- this is that override. The image sits next to this file
+ * on the installed installer root. */
+.product-logo {
+    background-image: url("pixel-blue-white.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 128px 128px;
+}
+
+/* Keep the hub headers and the dark sidebar from bleeding into each other. */
+AnacondaSpokeWindow #nav-box {
+    background-color: @anaconda_bg_color;
+    color: white;
+}
