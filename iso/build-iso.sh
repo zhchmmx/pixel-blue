@@ -77,7 +77,16 @@ install -Dm644 "${SRC}/system_files/etc/pki/containers/pixel-blue.pub" \
 rm -rf "${WORK}/payload"
 # No --all: the installer is x86_64-only, and copying every platform in an
 # index interacts with signature verification in ways not worth relying on.
-skopeo copy "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
+#
+# --remove-signatures only stops skopeo from carrying the .sig attachment to
+# the destination -- "do not copy signatures", per skopeo-copy(1), which calls
+# it "necessary when copying a signed image to a destination which does not
+# support signatures". The oci: transport is exactly such a destination, and
+# without the flag the copy dies with "Pushing signatures for OCI images is not
+# supported". Policy validation is a separate, always-on step (the same man page:
+# "Uses the system's trust policy to validate images, rejects images not trusted
+# by the policy"), so verification still happens before this line succeeds.
+skopeo copy --remove-signatures "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
 test -f "${WORK}/payload/oci-layout" || {
   echo "error: ${WORK}/payload is not an OCI layout" >&2
   exit 1
