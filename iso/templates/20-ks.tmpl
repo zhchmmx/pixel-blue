@@ -11,7 +11,7 @@
 ## %post pins it with `bootc switch` -- without that, `bootc upgrade` would have
 ## nothing to update from. This is the combination Universal Blue's ISOs use.
 append usr/share/anaconda/interactive-defaults.ks "ostreecontainer --url=/run/install/repo/payload --transport=oci --no-signature-verification"
-append usr/share/anaconda/interactive-defaults.ks "%post"
+append usr/share/anaconda/interactive-defaults.ks "%post --erroronfail"
 append usr/share/anaconda/interactive-defaults.ks "bootc switch --mutate-in-place --transport registry ${target_ref}"
 append usr/share/anaconda/interactive-defaults.ks "%end"
 
