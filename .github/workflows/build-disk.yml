@@ -19,8 +19,7 @@ on:
       - main
       - testing
     paths:
-      - 'Containerfile.installer'
-      - 'build_files/installer/**'
+      - 'iso/**'
       - 'disk_config/disk.toml'
       - 'flatpak_refs/**'
       - '.github/workflows/build-disk.yml'
@@ -30,7 +29,8 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}" # do not edit
   DEFAULT_TAG: "latest"
   BIB_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
-  IMAGE_BUILDER_IMAGE: "ghcr.io/osbuild/image-builder-cli:latest"
+  # Release the installer environment is built from; keep in step with the payload.
+  FEDORA_VERSION: "44"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -106,12 +106,17 @@ jobs:
           sudo apt-get install -y rclone
           rclone copy $SOURCE_DIR S3:${{ vars.S3_BUCKET_NAME }}
 
-  # Install ISO, built with osbuild image-builder (bootc-installer).
-  # The ISO boots Anaconda; it installs the published image from a
-  # containers-storage copy embedded in the ISO and the Flatpaks from
-  # flatpak_refs/ out of the local ostree repo baked into the installer image.
-  # Both happen before the first boot and need no network. There is no live
+  # Install ISO, built with lorax -- the tool Fedora and RHEL use for boot.iso.
+  # The ISO boots the graphical Anaconda installer; it installs the published
+  # image from an OCI layout on the media and the Flatpaks from an ostree repo
+  # also on the media, so the install needs no network. There is no live
   # desktop -- this is an installer, not a live session.
+  #
+  # The install is interactive: the kickstart appended by iso/templates/20-ks.tmpl
+  # carries no storage directives, so the Installation Destination page asks
+  # which disk to use. Everything about how the installer itself runs -- SELinux
+  # contexts, the logind ReserveVT drop-in, the anaconda-shell VT, the dracut
+  # modules -- comes from lorax rather than from this repository.
   build-iso:
     name: Build install ISO
     runs-on: ubuntu-24.04
@@ -134,62 +139,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Build installer image
-        run: |
-          set -euxo pipefail
-          # Flatpak runs inside this build, so bwrap needs sys_admin and
-          # unconfined labels.
-          sudo podman build \
-            --cap-add sys_admin \
-            --security-opt label=disable \
-            --tag "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
-            --file Containerfile.installer .
-
-      - name: Pull install payload into rootful storage
-        run: |
-          set -euxo pipefail
-          # image-builder copies the payload out of the host's container
-          # storage -- it never contacts a registry -- so the payload has to
-          # be there before the ISO is assembled. Installing this repo's
-          # policy first makes the pull verify the cosign signature, exactly
-          # like a client would.
-          sudo install -Dm644 system_files/etc/pki/containers/pixel-blue.pub /etc/pki/containers/pixel-blue.pub
-          sudo install -Dm644 system_files/etc/containers/policy.json /etc/containers/policy.json
-          sudo install -Dm644 system_files/etc/containers/registries.d/pixel-blue.yaml /etc/containers/registries.d/pixel-blue.yaml
-          sudo podman pull "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}"
-
-      - name: Build ISO with image-builder
+      # lorax builds the installer environment the way Fedora and RHEL do, so
+      # Anaconda's own requirements -- SELinux contexts, the logind ReserveVT
+      # drop-in, the anaconda-shell VT, the dracut modules -- come from the tool
+      # instead of from this repository. What we add is only ours: the payload
+      # image, our Flatpaks and our Anaconda profile (see iso/templates/).
+      - name: Build installer ISO with lorax
         id: build
         run: |
           set -euxo pipefail
           out="${RUNNER_TEMP}/iso-out"
           mkdir -p "${out}"
-          # Fedora bootc containers do not declare a root filesystem and
-          # image-builder refuses to guess one, so pass the same ext4 default
-          # bootc-image-builder uses for the qcow2/raw images.
-          sudo podman run --rm \
-            --privileged \
-            --pull=newer \
-            --security-opt label=type:unconfined_t \
-            -v "${out}":/output \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
-            "${IMAGE_BUILDER_IMAGE}" \
-            build \
-            --output-dir /output \
-            --bootc-ref "localhost/${IMAGE_NAME}-installer:${DEFAULT_TAG}" \
-            --bootc-installer-payload-ref "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
-            --bootc-default-fs btrfs \
-            --progress verbose \
-            bootc-installer
-
-          # The layout under --output-dir is image-builder's business (it
-          # nests by name/type/arch), so find the ISO instead of guessing.
-          iso="$(find "${out}" -type f -name '*.iso' | head -n1)"
-          if [[ -z "${iso}" ]]; then
-            echo "::error::image-builder produced no ISO under ${out}"
-            exit 1
-          fi
-          echo "iso-path=${iso}" >> "$GITHUB_OUTPUT"
+          sudo podman run --rm --privileged \
+            -v "${PWD}:/src:ro" \
+            -v "${out}:/out" \
+            -e PAYLOAD_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            -e PAYLOAD_TARGET_REF="${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" \
+            -e VERSION="${FEDORA_VERSION}" \
+            -e RELEASE="1" \
+            "registry.fedoraproject.org/fedora:${FEDORA_VERSION}" \
+            bash /src/iso/build-iso.sh
+          test -f "${out}/pixel-blue.iso"
+          echo "iso-path=${out}/pixel-blue.iso" >> "$GITHUB_OUTPUT"
 
       - name: Name and checksum ISO
         id: checksum

@@ -1,0 +1,28 @@
+<%page args="profile_src, assets_src"/>
+## What the installer calls itself, which Anaconda profile it uses, and how it
+## looks.
+##
+## pixel-blue.conf inherits fedora-silverblue, which is what keeps the
+## installation summary to the Silverblue set of spokes and its stylesheet, and
+## what makes automatic partitioning match a bootc system. The variant keys are
+## what select that profile: Anaconda matches /etc/os-release against
+## /etc/anaconda/profile.d/*.conf, and variant_id=pixel-blue is a value no
+## upstream profile claims.
+##
+## The two os-release keys are replaced, not appended. Appending left both
+## "VARIANT_ID=silverblue" and "VARIANT_ID=pixel-blue" in the file, which is
+## what the first build of this ISO shipped; os-release then has two answers to
+## the same question.
+##
+## The product name and version on the window and in the buildstamp come from
+## lorax's --product/--version/--isfinal, not from here.
+runcmd mkdir -p ${root}/etc/anaconda/profile.d ${root}/usr/share/pixel-blue
+runcmd cp -a ${profile_src}/pixel-blue.conf ${root}/etc/anaconda/profile.d/pixel-blue.conf
+runcmd sh -c "sed -i 's|^VARIANT=.*|VARIANT=\"Pixel Blue\"|; s|^VARIANT_ID=.*|VARIANT_ID=pixel-blue|' ${root}/usr/lib/os-release"
+
+## Installer branding: the stylesheet pixel-blue.conf points at, plus the mark
+## it draws. Both land in the same directory so the url() in the CSS resolves
+## without absolute paths.
+runcmd cp -a ${profile_src}/pixel-blue.css ${root}/usr/share/pixel-blue/pixel-blue.css
+runcmd cp -a ${assets_src}/pixel-blue.png ${root}/usr/share/pixel-blue/pixel-blue.png
+runcmd cp -a ${profile_src}/pixel-blue-white.png ${root}/usr/share/pixel-blue/pixel-blue-white.png

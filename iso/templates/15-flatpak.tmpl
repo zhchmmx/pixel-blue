@@ -1,0 +1,29 @@
+<%page args="profile_src"/>
+## The path Anaconda looks for the preinstalled Flatpaks at.
+##
+## pyanaconda hardcodes file:///flatpak/repo (see rpm_ostree/flatpak_manager.py),
+## so the installer's root gets a /flatpak symlink pointing at the copy that
+## mkksiso puts at the ISO root. The repo itself cannot be shipped from inside
+## the installer's root filesystem: it is an install source, and Anaconda mounts
+## the media at /run/install/repo.
+##
+## Note the git history -- this file used to `cp -a` the repo into ${root} as
+## well, which put it inside the squashfs where the kickstart would never find
+## it. Templates reach the installer's root, not the ISO root; that is what
+## mkksiso is for.
+symlink /run/install/repo/flatpak /flatpak
+
+## Which remote the installed refs end up pointing at.
+##
+## InstallFlatpaksTask deploys the refs from the local repo, then adds the
+## remote named in [Payload] flatpak_remote, repoints every installed ref at it
+## and removes the temporary "Anaconda" remote.
+##
+## Anaconda's default for that key is "fedora  oci+https://registry.
+## fedoraproject.org": without this override every preinstalled app and runtime
+## comes out with origin=fedora and `flatpak update` follows the Fedora OCI
+## registry instead of Flathub. The installation itself still succeeds, so the
+## damage only shows on the first update -- which is why it got through a round
+## of testing unnoticed.
+runcmd mkdir -p ${root}/etc/anaconda/conf.d
+runcmd cp -a ${profile_src}/10-flatpak.conf ${root}/etc/anaconda/conf.d/10-flatpak.conf

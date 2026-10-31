@@ -325,7 +325,8 @@ jobs:
                           problems = ['%s (line %d, column %d)' % (exc.msg, exc.lineno, exc.colno)]
                   else:
                       head = first_meaningful_line(text)
-                      if head.startswith('<'):
+                      # Mako directives in lorax templates (<%...>) are not XML.
+                      if head.startswith('<') and not head.startswith('<%'):
                           counts['xml'] += 1
                           try:
                               ET.fromstring(data)  # expat never fetches the DTD

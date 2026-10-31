@@ -24,19 +24,30 @@ just run-vm-iso     # boot the ISO in QEMU
 
 `just rebuild-iso` does the first two steps in one go.
 
-The ISO is an **installer**, not a live session: it boots straight into Anaconda,
-where you pick the target disk. Building it takes two images:
+The ISO is an **installer**, not a live session: it boots into the graphical
+Anaconda installer, where you pick the target disk and keep the default
+`Automatic` layout — the same path a Fedora Silverblue install takes.
 
-- `Containerfile.installer` — the environment Anaconda runs in. Besides Anaconda
-  it carries `/flatpak/repo`, a local Flatpak ostree repo built from
-  `flatpak_refs/`. Anaconda installs every app in it into the target's
-  `/var/lib/flatpak` **during the installation**, so the Flatpaks are there on
-  the first boot — no network, no first-boot script.
-- the published `pixel-blue` image itself, embedded as the install payload.
+It is built with [lorax](https://github.com/weldr/lorax), the tool Fedora and
+RHEL use to produce `boot.iso`. That means the installer environment itself —
+Anaconda, the SELinux contexts, the logind `ReserveVT` drop-in, the
+`anaconda-shell` VT, the dracut modules — comes from lorax, not from this
+repository. `iso/build-iso.sh` adds only what is ours, through the templates in
+`iso/templates/`:
 
-The ISO is produced by [osbuild image-builder](https://github.com/osbuild/image-builder)
-as a `bootc-installer` artifact; the builder image is pinned by
-`IMAGE_BUILDER_IMAGE` in `image-template.env`.
+- the published `pixel-blue` image, exported as an OCI layout and copied onto
+  the media; the appended kickstart installs it with
+  `ostreecontainer --transport=oci`, then pins it for updates with
+  `bootc switch` in a `%post`
+- `/flatpak/repo`, an ostree repo built from `flatpak_refs/`. Anaconda installs
+  every app in it into the target's `/var/lib/flatpak` **during the
+  installation**, so the Flatpaks are there on the first boot — no network, no
+  first-boot script
+- `iso/pixel-blue.conf`, an Anaconda profile inheriting `fedora-silverblue`,
+  selected by appending `VARIANT_ID=pixel-blue` to the installer's os-release
+
+The install stays interactive because the appended kickstart carries no storage
+directives: the Installation Destination page asks which disk to use.
 
 ## Option 2: Switch to Pixel Blue
 
