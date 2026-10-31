@@ -24,7 +24,7 @@
  * in product.img") -- this is that override. The image sits next to this file
  * on the installed installer root. */
 .product-logo {
-    background-image: url("pixel-blue.png");
+    background-image: url("pixel-blue-white.png");
     background-repeat: no-repeat;
     background-position: center;
     background-size: 128px 128px;
