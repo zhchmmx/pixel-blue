@@ -147,6 +147,7 @@ The Pixelbook keyboard is remapped via [keyd](https://github.com/rvaiya/keyd). T
 - Add experimental auto brightness using the Pixelbook (eve) vendor curve.
 - Add tablet-mode keyboard backlight (issue #72).
 - Add [Waydroid](https://waydro.id/) (Android in a container) from the Fedora repos.
+- Ship the Flathub signing key in the image (`/usr/share/ostree/trusted.gpg.d/flathub.gpg`), because an ISO install leaves the flathub remote without one (issue #120).
 
 # Learn More
 
