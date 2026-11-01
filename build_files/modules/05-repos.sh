@@ -3,11 +3,8 @@
 
 set -ouex pipefail
 
-# Packages can be installed from any enabled yum repo on the image.
 # This image builds from the vanilla fedora-silverblue base (not a ublue main
-# image), so RPM Fusion repos are NOT pre-enabled; add them below.
-
-# Install base packages from fedora repos
+# image), so RPM Fusion repos are NOT pre-enabled; they are added below.
 dnf5 install -y git git-credential-oauth
 
 # Add RPM Fusion repos (free for ffmpeg/codecs/mesa-freeworld, nonfree for
@@ -22,7 +19,6 @@ dnf5 install -y \
 # backlight, Gio.Settings for the ambient-enabled toggle
 dnf5 install -y python3-dbus python3-gobject-base
 
-# Add Terra repo (for keyd package) and install keyd
-# Pixelbook (eve) keyboard mapping requires keyd
+# Terra repo, for keyd (Pixelbook keyboard mapping)
 dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
 dnf5 install -y keyd

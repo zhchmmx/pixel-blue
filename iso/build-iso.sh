@@ -5,17 +5,14 @@
 # installs its own build dependencies, so the same script also works on a
 # workstation.
 #
-# Why lorax. It is the tool Fedora and RHEL use to produce boot.iso, and it
-# brings the whole installer environment with it: the anaconda packages, the
+# Why lorax: it is the tool Fedora and RHEL use to produce boot.iso, and it
+# brings the whole installer environment with it -- the anaconda packages, the
 # SELinux contexts (it runs setfiles over the tree), the logind ReserveVT
 # drop-in, the anaconda-shell VT plumbing, the dracut modules. This repository
 # used to reimplement all of that by hand in a Containerfile to feed
 # image-builder's bootc-generic-iso, and every one of those pieces broke in a
-# way that cost a build to find.
-#
-# What this script adds on top of a stock lorax run is only what is ours: the
-# payload image, our Flatpas, our Anaconda profile. Everything about *how* the
-# installer runs is lorax's.
+# way that cost a build to find. On top of a stock lorax run this script adds
+# only what is ours: the payload image, our Flatpaks, our Anaconda profile.
 #
 # Environment:
 #   PAYLOAD_REF         image to install, e.g. ghcr.io/zhchmmx/pixel-blue:latest
@@ -61,12 +58,11 @@ test -f "${WORK}/flatpak/repo/summary" || {
 }
 
 step "payload as an OCI layout"
-# Verify the payload's cosign signature while pulling it. The repository's own
-# policy and key go in at the paths that policy names, so skopeo checks the
-# .sig attachment against them. Left alone, the Fedora container's default
-# policy (insecureAcceptAnything) accepts anything, and the ISO carries an
-# unverified payload however it was published -- a check the pre-lorax build
-# did have, by pulling with podman on a host primed with this same policy.
+# Verify the payload's cosign signature while pulling it: the repository's own
+# policy and key go in at the paths that policy names, so skopeo checks the .sig
+# attachment against them. Left alone, the Fedora container's default policy
+# (insecureAcceptAnything) accepts anything and the ISO carries an unverified
+# payload however it was published.
 install -Dm644 "${SRC}/system_files/etc/containers/policy.json" \
   /etc/containers/policy.json
 install -Dm644 "${SRC}/system_files/etc/containers/registries.d/pixel-blue.yaml" \
@@ -75,17 +71,12 @@ install -Dm644 "${SRC}/system_files/etc/pki/containers/pixel-blue.pub" \
   /etc/pki/containers/pixel-blue.pub
 
 rm -rf "${WORK}/payload"
-# No --all: the installer is x86_64-only, and copying every platform in an
-# index interacts with signature verification in ways not worth relying on.
-#
-# --remove-signatures only stops skopeo from carrying the .sig attachment to
-# the destination -- "do not copy signatures", per skopeo-copy(1), which calls
-# it "necessary when copying a signed image to a destination which does not
-# support signatures". The oci: transport is exactly such a destination, and
-# without the flag the copy dies with "Pushing signatures for OCI images is not
-# supported". Policy validation is a separate, always-on step (the same man page:
-# "Uses the system's trust policy to validate images, rejects images not trusted
-# by the policy"), so verification still happens before this line succeeds.
+# No --all: the installer is x86_64-only, and copying every platform in an index
+# interacts with signature verification in ways not worth relying on.
+# --remove-signatures is required for the oci: transport, which cannot store a
+# signature ("Pushing signatures for OCI images is not supported"); it only stops
+# skopeo from carrying the .sig attachment over. Policy validation is a separate,
+# always-on step, so verification still happens before this line succeeds.
 skopeo copy --remove-signatures "docker://${PAYLOAD_REF}" "oci:${WORK}/payload:latest"
 test -f "${WORK}/payload/oci-layout" || {
   echo "error: ${WORK}/payload is not an OCI layout" >&2
