@@ -77,25 +77,10 @@ sudoif command *args:
     }
     sudoif {{ command }} {{ args }}
 
-# This Justfile recipe builds a container image using Podman.
-#
-# Arguments:
-#   $target_image - The tag you want to apply to the image (default: $image_name).
-#   $tag - The tag for the image (default: $default_tag).
-#
-# The script sets the version label to <UTC date>.<build number> (for example
-# 20261024.42). In CI that build number is the GitHub Actions run number; local
-# builds fall back to BUILD_NUMBER or the commit count. The version carries no
-# branch name or commit hash; the commit is recorded separately in
+# The version label is <UTC date>.<build number> (for example 20261024.42): in CI
+# that build number is the GitHub Actions run number, locally it falls back to
+# BUILD_NUMBER or the commit count. The commit itself goes to
 # org.opencontainers.image.revision.
-#
-# just build $target_image $tag
-#
-# Example usage:
-#   just build myimage mytag
-#
-# This will build an image 'myimage:mytag'
-#
 
 # Build the image using the specified parameters
 build $target_image=image_name $tag=default_tag:
@@ -116,8 +101,6 @@ build $target_image=image_name $tag=default_tag:
         LABELS+=("--label" "org.opencontainers.image.revision=${GIT_SHA}")
     fi
 
-    # Image metadata for https://artifacthub.io/ - This is optional but is highly recommended so we all can get a index of all the custom images
-    # The metadata by itself is not going to do anything, you choose if you want your image to be on ArtifactHub or not.
     LABELS+=("--label" "io.artifacthub.package.deprecated=false")
     LABELS+=("--label" "io.artifacthub.package.keywords={{ image_keywords }}")
     LABELS+=("--label" "io.artifacthub.package.license=Apache-2.0")
@@ -128,7 +111,6 @@ build $target_image=image_name $tag=default_tag:
     LABELS+=("--label" "org.opencontainers.image.title={{ image_name }}")
     LABELS+=("--label" "org.opencontainers.image.vendor={{ repo_organization }}")
 
-    # This actually builds the image!
     PODMAN_BUILD_ARGS=("${LABELS[@]}" --pull=newer --tag "${target_image}:${tag}" --file Containerfile)
 
     podman build "${PODMAN_BUILD_ARGS[@]}" .
@@ -140,13 +122,10 @@ rechunk $target_image=image_name $tag=default_tag:
     set -xeuo pipefail
 
     # TODO: pin chunkah image to hash once mature enough
-    # You may run into space issues on github runners as we are making a
-    # complete copy of the image, which likely has no shared layers, unless your
-    # base image is also using chunkah
     CHUNKAH_CONFIG_FILE="$(mktemp)"
 
-    # You may omit the current directory here if you are confident that you
-    # won't run out of space on /tmp for your image
+    # Not /tmp: a chunkah run makes a complete copy of the image and can outgrow
+    # the scratch space there
     CHUNKAH_OUTPUT_DIR="$(mktemp -d ./"${target_image}"_chunkah_XXXXXX)"
 
     trap 'rm -f "${CHUNKAH_CONFIG_FILE}"; rm -rf "${CHUNKAH_OUTPUT_DIR}"' EXIT
@@ -169,16 +148,17 @@ rechunk $target_image=image_name $tag=default_tag:
     CHUNKED_IMAGE="$(podman pull "oci:${CHUNKAH_OUTPUT_DIR}/chunked")"
     podman tag "${CHUNKED_IMAGE}" "${target_image}:${tag}"
 
-# Split the image for smaller updates (Classical)!
-#
 # The chunker re-exports the whole tree through an ostree commit, and the
-# initramfs that ships in the chunked image is the base kernel-layer one
-# again even though 60-branding-dracut.sh regenerated it (issue #75: the boot/GDM-login
-# splash read the stale initrd copy, regardless of the final /usr artwork).
-# So after rechunking, regenerate the initramfs once more on the finished
-# image as one derived layer, asserting the baked watermark byte-matches the
-# live /usr copy (the pixel-blue-logos RPM installed in 10-logos.sh owns that
-# path after the swap; the check itself is payload-agnostic).
+# initramfs that ships in the chunked image is the base kernel-layer one again
+# even though 60-branding-dracut.sh regenerated it (issue #75: the boot/GDM-login
+# splash read the stale initrd copy, regardless of the final /usr artwork). So
+# after rechunking, regenerate the initramfs once more on the finished image as
+# one derived layer, asserting the baked watermark byte-matches the live /usr
+# copy (the pixel-blue-logos RPM installed in 10-logos.sh owns that path after
+# the swap; the check itself is payload-agnostic). The dracut flags and their
+# reasoning are documented in 60-branding-dracut.sh.
+
+# Split the image for smaller updates (Classical)!
 ostree-rechunk $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
 
@@ -186,7 +166,6 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
 
     IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d).${BUILD_NUMBER:-$(git rev-list --count HEAD)}}"
 
-    # Use the already-built local image to avoid pulling from a remote registry
     RPM_OSTREE_CHUNKER_IMAGE="localhost/${target_image}:${tag}"
 
     GRAPHROOT="$(podman info --format '{{ '{{.Store.GraphRoot}}' }}')"
@@ -204,26 +183,13 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
 
-    # Regenerate the initramfs on the rechunked image so the boot splash
-    # matches the final /usr artwork: the chunker re-export puts the base
-    # kernel-layer initrd back into /usr/lib/modules/<kver>/initramfs.img,
-    # which the boot/GDM-login splash reads. The RUN also asserts that the
-    # watermark.png baked in the initrd byte-matches the live /usr copy, so a
-    # stale splash fails the build loudly. Appending a derived layer keeps the
-    # chunked layering (and thus delta updates) intact. dracut is called with
-    # the kernel version and the output path spelled out, because in a
-    # container it would otherwise default to /boot/initramfs-$kver.img and
-    # leave the image's /usr/lib/modules/<kver>/initramfs.img untouched.
-    # --add ostree is required for a bootable bootc initrd (it provides
-    # ostree-prepare-root, which prepares /sysroot before switch-root); the
-    # RUN asserts it landed so a bad initrd fails here, not at boot.
-    # Re-apply build metadata labels on the FINAL image. The chunker
-    # (rpm-ostree compose build-chunked-oci) re-exports the image from the
-    # ostree commit and does NOT carry over the config labels set by
-    # `just build` (org.opencontainers.image.*, io.artifacthub.package.*),
-    # so they must be re-stamped here or the pushed image loses them all
-    # (observed on GHCR: version label was null). Mirrors the logic in the
-    # build recipe verbatim, including the clean-working-tree condition.
+    # Regenerate the initramfs on the rechunked image, as the recipe doc says
+    # above. Appending this as a derived layer keeps the chunked layering (and
+    # thus delta updates) intact.
+    # Re-apply the build metadata labels on the FINAL image: the chunker
+    # re-exports from the ostree commit and does not carry over the labels set
+    # by `just build`, so they must be re-stamped here (observed on GHCR: the
+    # version label was null).
     LABELS=()
     if [[ -z "$(git status -s)" ]]; then
         GIT_SHA=$(git rev-parse --short HEAD)
@@ -314,16 +280,13 @@ tag-images $target_image=image_name $tag=default_tag tags="":
     #!/usr/bin/env bash
     set -eoux pipefail
 
-    # Get Image, and untag
     IMAGE=$(podman inspect ${target_image}:${tag} | jq -r .[].Id)
     podman untag ${IMAGE}
 
-    # Tag Image
     for tag in {{ tags }}; do
         podman tag $IMAGE "${target_image}:${tag}"
     done
 
-    # Show Images
     podman images
 
 # Image Name
@@ -335,34 +298,18 @@ image_name $target_image=image_name:
 
     echo "${image_name}"
 
-# Command: _rootful_load_image
-# Description: This script checks if the current user is root or running under sudo. If not, it attempts to resolve the image tag using podman inspect.
-#              If the image is found, it loads it into rootful podman. If the image is not found, it pulls it from the repository.
-#
-# Parameters:
-#   $target_image - The name of the target image to be loaded or pulled.
-#   $tag - The tag of the target image to be loaded or pulled. Default is 'default_tag'.
-#
-# Example usage:
-#   _rootful_load_image my_image latest
-#
-# Steps:
-# 1. Check if the script is already running as root or under sudo.
-# 2. Check if target image is in the non-root podman container storage)
-# 3. If the image is found, load it into rootful podman using podman scp.
-# 4. If the image is not found, pull it from the remote repository into reootful podman.
-
+# Load the image into rootful podman: copy it out of the user store when it is
+# already there, otherwise pull it from the remote repository. No-op when the
+# recipe is already running as root or under sudo.
 _rootful_load_image $target_image=image_name $tag=default_tag:
     #!/usr/bin/env bash
     set -eoux pipefail
 
-    # Check if already running as root or under sudo
     if [[ -n "${SUDO_USER:-}" || "${UID}" -eq "0" ]]; then
         echo "Already root or running under sudo, no need to load image from user podman."
         exit 0
     fi
 
-    # Try to resolve the image tag using podman inspect
     set +e
     resolved_tag=$(podman inspect -t image "${target_image}:${tag}" | jq -r '.[].RepoTags.[0]')
     return_code=$?
@@ -371,28 +318,17 @@ _rootful_load_image $target_image=image_name $tag=default_tag:
     USER_IMG_ID=$(podman images --filter reference="${target_image}:${tag}" --format "'{{ '{{.ID}}' }}'")
 
     if [[ $return_code -eq 0 ]]; then
-        # If the image is found, load it into rootful podman
         ID=$(just sudoif podman images --filter reference="${target_image}:${tag}" --format "'{{ '{{.ID}}' }}'")
         if [[ "$ID" != "$USER_IMG_ID" ]]; then
-            # If the image ID is not found or different from user, copy the image from user podman to root podman
             COPYTMP=$(mktemp -p "${PWD}" -d -t _build_podman_scp.XXXXXXXXXX)
             just sudoif TMPDIR=${COPYTMP} podman image scp ${UID}@localhost::"${target_image}:${tag}" root@localhost::"${target_image}:${tag}"
             rm -rf "${COPYTMP}"
         fi
     else
-        # If the image is not found, pull it from the repository
         just sudoif podman pull "${target_image}:${tag}"
     fi
 
 # Build a bootc bootable image using Bootc Image Builder (BIB)
-# Converts a container image to a bootable image
-# Parameters:
-#   target_image: The name of the image to build (ex. localhost/fedora)
-#   tag: The tag of the image to build (ex. latest)
-#   type: The type of image to build (ex. qcow2, raw, iso)
-#   config: The configuration file to use for the build (default: disk_config/disk.toml)
-
-# Example: just _rebuild-bib localhost/fedora latest qcow2 disk_config/disk.toml
 _build-bib $target_image $tag $type $config: (_rootful_load_image target_image tag)
     #!/usr/bin/env bash
     set -euo pipefail
@@ -423,13 +359,6 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
     sudo chown -R $USER:$USER output/
 
 # Podman builds the image from the Containerfile and creates a bootable image
-# Parameters:
-#   target_image: The name of the image to build (ex. localhost/fedora)
-#   tag: The tag of the image to build (ex. latest)
-#   type: The type of image to build (ex. qcow2, raw, iso)
-#   config: The configuration file to use for the build (deafult: disk_config/disk.toml)
-
-# Example: just _rebuild-bib localhost/fedora latest qcow2 disk_config/disk.toml
 _rebuild-bib $target_image $tag $type $config: (build target_image tag) && (_build-bib target_image tag type config)
 
 # Build a QCOW2 virtual machine image
@@ -440,23 +369,16 @@ build-qcow2 $target_image=("localhost/" + image_name) $tag=default_tag: && (_bui
 [group('Build Virtal Machine Image')]
 build-raw $target_image=("localhost/" + image_name) $tag=default_tag: && (_build-bib target_image tag "raw" "disk_config/disk.toml")
 
-# Build the install ISO with lorax
-#
-# The ISO boots the graphical Anaconda installer; the user picks the disk and
-# keeps the Automatic layout. It installs the published Pixel Blue image from an
-# OCI layout on the media, plus the Flatpaks in flatpak_refs/ out of an ostree
-# repo also on the media -- both offline, both before the first boot. There is
-# no live desktop: this is an installer.
-#
-# lorax is what Fedora and RHEL use for boot.iso, so the installer environment
-# itself comes from it instead of from this repository; iso/build-iso.sh adds
-# only our payload, our Flatpaks and our Anaconda profile. The stage runs in a
-# fedora container because lorax is a Fedora tool.
+# The ISO boots the graphical Anaconda installer and installs the published
+# Pixel Blue image from an OCI layout on the media, plus the Flatpaks in
+# flatpak_refs/ out of an ostree repo also on the media -- both offline, both
+# before the first boot. There is no live desktop: this is an installer.
 #
 # $payload_image is the published reference: it is what gets installed and what
-# the installed system follows for updates.
-#
-# Example: just build-iso
+# the installed system follows for updates. The rationale for building with
+# lorax is in iso/build-iso.sh.
+
+# Build the install ISO with lorax
 [group('Build Virtal Machine Image')]
 build-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag):
     #!/usr/bin/env bash
@@ -479,7 +401,7 @@ build-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":
     sudo chown "$(id -u):$(id -g)" "${out}/pixel-blue.iso"
     mv -f "${out}/pixel-blue.iso" build/pixel-blue.iso
 
-# Rebuild the live ISO (rebuilds the container image first)
+# Rebuild the install ISO (rebuilds the container image first)
 [group('Build Virtal Machine Image')]
 rebuild-iso $payload_image=("ghcr.io/" + repo_organization + "/" + image_name + ":" + default_tag): build && (build-iso payload_image)
 
@@ -496,18 +418,15 @@ _run-vm $target_image $tag $type:
     #!/usr/bin/env bash
     set -eoux pipefail
 
-    # Determine the image file based on the type
     image_file="output/${type}/disk.${type}"
     if [[ $type == iso ]]; then
         image_file="build/pixel-blue.iso"
     fi
 
-    # Build the image if it does not exist
     if [[ ! -f "${image_file}" ]]; then
         just "build-${type}" "$target_image" "$tag"
     fi
 
-    # Determine an available port to use
     port=8006
     while grep -q :${port} <<< $(ss -tunalp); do
         port=$(( port + 1 ))
@@ -515,7 +434,6 @@ _run-vm $target_image $tag $type:
     echo "Using Port: ${port}"
     echo "Connect to http://localhost:${port}"
 
-    # Set up the arguments for running the VM
     run_args=()
     run_args+=(--rm --privileged)
     run_args+=(--pull=newer)
@@ -529,7 +447,6 @@ _run-vm $target_image $tag $type:
     run_args+=(--volume "${PWD}/${image_file}":"/boot.${type}")
     run_args+=(docker.io/qemux/qemu)
 
-    # Run the VM and open the browser to connect
     (sleep 30 && xdg-open http://localhost:"$port") &
     podman run "${run_args[@]}"
 
@@ -567,22 +484,18 @@ spawn-vm rebuild="0" type="qcow2" ram="6G":
 lint:
     #!/usr/bin/env bash
     set -eoux pipefail
-    # Check if shellcheck is installed
     if ! command -v shellcheck &> /dev/null; then
         echo "shellcheck could not be found. Please install it."
         exit 1
     fi
-    # Run shellcheck on all Bash scripts
     find . -iname "*.sh" -type f -exec shellcheck "{}" ';'
 
 # Runs shfmt on all Bash scripts
 format:
     #!/usr/bin/env bash
     set -eoux pipefail
-    # Check if shfmt is installed
     if ! command -v shfmt &> /dev/null; then
         echo "shfmt could not be found. Please install it."
         exit 1
     fi
-    # Run shfmt on all Bash scripts
     find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
