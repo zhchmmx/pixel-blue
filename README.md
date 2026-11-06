@@ -134,13 +134,19 @@ does nothing in an X11 session, which is not GNOME's default session. Verify wit
 | Combo                          | Emits                               | Function                                                                                        |
 | ------------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `Search` + `Back`…`Vol +`      | `F1`–`F10`                          | the official top-row F-keys                                                                     |
-| `Search` + `Three-lines`       | `F12`                               | F12 (ChromeOS has no F12 key)                                                                   |
+| `Search` + `Three-lines`       | `F11`                               | F11 (top-row key #12, continuing ChromeOS's F(n-1) numbering)                                   |
+| `Search` + `Shift` + `Three-lines` | `F12`                           | F12, the one F-key this keyboard has no slot for                                                |
 | `Search` + `←` / `→`           | bare `Home` / `End`                 | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
 | `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End`          | select to line start / end                                                                      |
 | `Search` + `Ctrl` + `←` / `→`  | `Ctrl+Home` / `Ctrl+End`            | start / end of document                                                                         |
 | `Search` + `[` / `]`           | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace                                                                       |
 | `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down`    | move window to previous / next workspace                                                        |
 | `Search` + `Alt`               | `Caps Lock`                         | Caps Lock (either order)                                                                        |
+
+ChromeOS numbers top-row key *n* as `F(n-1)`, so the ten media keys are F1–F10
+and the menu key, being key #12, is F11. F12 is the only F-key with no slot on
+the keyboard, so it takes one extra modifier (Shift). `F11` is left unbound at
+the compositor level, so applications receive it.
 
 ## Alt held
 
