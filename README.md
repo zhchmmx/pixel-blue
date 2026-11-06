@@ -111,11 +111,23 @@ The Pixelbook keyboard is remapped via [keyd](https://github.com/rvaiya/keyd). T
 | `Esc`                                                   | Cancel                       | `Esc` (native)                                          |
 | `Back`                                                  | Back                         | `Back` (native media key)                               |
 | `Refresh`                                               | Forward                      | `Refresh` (native media key)                            |
-| `Fullscreen` (`zoom`)                                   | Fullscreen                   | `F11` (bare `KEY_ZOOM` does nothing in GNOME)           |
+| `Fullscreen` (`zoom`)                                   | Fullscreen                   | `XF86FullScreen` → GNOME native **toggle fullscreen**   |
 | `Overview` (`scale`)                                    | Show windows / Desks         | `Print` → **screenshot UI** (owner choice; see caveats) |
 | `Brightness −` / `+`                                    | Brightness                   | native pass-through                                     |
 | `Play/Pause`, `Mute`, `Vol −` / `+`                     | Media                        | native pass-through                                     |
 | `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native)       |
+
+The Fullscreen key is not remapped: it emits `KEY_FULL_SCREEN`, which
+xkeyboard-config turns into the `XF86FullScreen` keysym, and the image binds that
+keysym to GNOME's own `org.gnome.desktop.wm.keybindings toggle-fullscreen`. The
+compositor performs the toggle, so the key works in every app — not only the ones
+with an `F11` handler of their own, such as Files and Terminal — and the shortcut
+shows up in **Settings → Keyboard** as a default, where it can be rebound. `F11`
+stays unbound, so apps that handle it keep their own fullscreen. The keysym is
+Wayland-only (its keycode, 380, is beyond X11's 8-bit keycode range), so the key
+does nothing in an X11 session, which is not GNOME's default session. Verify with
+`gsettings get org.gnome.desktop.wm.keybindings toggle-fullscreen` (expects
+`['XF86FullScreen']`).
 
 ## Search (Meta) held
 

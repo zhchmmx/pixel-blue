@@ -8,3 +8,11 @@
 [org.gnome.shell]
 favorite-apps=['org.gnome.Epiphany.desktop', 'org.gnome.Calendar.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Software.desktop', 'org.gnome.TextEditor.desktop', 'org.gnome.Calculator.desktop']
 enabled-extensions=['tablet-kbd-backlight@zhchmmx.github.io']
+# Upstream leaves toggle-fullscreen unbound. The Pixelbook Fullscreen key emits
+# KEY_FULL_SCREEN, which xkeyboard-config maps to the XF86FullScreen keysym, so
+# this binds the key itself; keyd does not remap it (etc/keyd/cros.conf has no
+# zoom binding). The compositor performs the toggle, so it works in every app;
+# being a schema default rather than a per-user value, it also shows up in
+# Settings -> Keyboard without the "modified" marker, and stays rebindable.
+[org.gnome.desktop.wm.keybindings]
+toggle-fullscreen=['XF86FullScreen']
