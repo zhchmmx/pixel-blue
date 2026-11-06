@@ -1,7 +1,8 @@
 #!/bin/bash
-# GNOME Shell default dash favorites and extension defaults
+# GNOME defaults: dash favorites, enabled extensions and the fullscreen
+# keybinding
 #
-# Both are pinned in
+# All three are pinned in
 # system_files/usr/share/glib-2.0/schemas/zz0-pixel-blue-modifications.gschema.override,
 # which the `cp -avf /ctx/system_files/. /` in 00-system-files.sh places in
 # /usr/share/glib-2.0/schemas/. Schemas must be recompiled for the override to

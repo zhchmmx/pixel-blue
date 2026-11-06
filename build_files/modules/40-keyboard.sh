@@ -7,6 +7,10 @@
 # gsettings-desktop-schemas so keyd output avoids clashing with them. The final
 # mapping table is documented in README.md (Keyboard layout).
 #
+# The Fullscreen key is not remapped at all: it already produces the
+# XF86FullScreen keysym, which the gschema override under system_files/ binds to
+# org.gnome.desktop.wm.keybindings toggle-fullscreen (upstream leaves it empty).
+#
 # The keymap data lives in dedicated files under system_files/ and is installed
 # by the `cp -a /ctx/system_files` in 00-system-files.sh:
 #   system_files/etc/keyd/cros.conf                    -> /etc/keyd/cros.conf
