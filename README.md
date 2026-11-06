@@ -111,24 +111,42 @@ The Pixelbook keyboard is remapped via [keyd](https://github.com/rvaiya/keyd). T
 | `Esc`                                                   | Cancel                       | `Esc` (native)                                          |
 | `Back`                                                  | Back                         | `Back` (native media key)                               |
 | `Refresh`                                               | Forward                      | `Refresh` (native media key)                            |
-| `Fullscreen` (`zoom`)                                   | Fullscreen                   | `F11` (bare `KEY_ZOOM` does nothing in GNOME)           |
+| `Fullscreen` (`zoom`)                                   | Fullscreen                   | `XF86FullScreen` → GNOME native **toggle fullscreen**   |
 | `Overview` (`scale`)                                    | Show windows / Desks         | `Print` → **screenshot UI** (owner choice; see caveats) |
 | `Brightness −` / `+`                                    | Brightness                   | native pass-through                                     |
 | `Play/Pause`, `Mute`, `Vol −` / `+`                     | Media                        | native pass-through                                     |
 | `Three-lines` (menu key, scancode `0x5d` → `dashboard`) | System menu (Quick Settings) | `Super+S` → **Quick Settings** (GNOME 45+ native)       |
+
+The Fullscreen key is not remapped: it emits `KEY_FULL_SCREEN`, which
+xkeyboard-config turns into the `XF86FullScreen` keysym, and the image binds that
+keysym to GNOME's own `org.gnome.desktop.wm.keybindings toggle-fullscreen`. The
+compositor performs the toggle, so the key works in every app — not only the ones
+with an `F11` handler of their own, such as Files and Terminal — and the shortcut
+shows up in **Settings → Keyboard** as a default, where it can be rebound. `F11`
+stays unbound, so apps that handle it keep their own fullscreen. The keysym is
+Wayland-only (its keycode, 380, is beyond X11's 8-bit keycode range), so the key
+does nothing in an X11 session, which is not GNOME's default session. Verify with
+`gsettings get org.gnome.desktop.wm.keybindings toggle-fullscreen` (expects
+`['XF86FullScreen']`).
 
 ## Search (Meta) held
 
 | Combo                          | Emits                               | Function                                                                                        |
 | ------------------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `Search` + `Back`…`Vol +`      | `F1`–`F10`                          | the official top-row F-keys                                                                     |
-| `Search` + `Three-lines`       | `F12`                               | F12 (ChromeOS has no F12 key)                                                                   |
+| `Search` + `Three-lines`       | `F11`                               | F11 (top-row key #12, continuing ChromeOS's F(n-1) numbering)                                   |
+| `Search` + `Shift` + `Three-lines` | `F12`                           | F12, the one F-key this keyboard has no slot for                                                |
 | `Search` + `←` / `→`           | bare `Home` / `End`                 | start / end of line (emitted without `Super`, so it is not read as a GNOME window-tiling combo) |
 | `Search` + `Shift` + `←` / `→` | `Shift+Home` / `Shift+End`          | select to line start / end                                                                      |
 | `Search` + `Ctrl` + `←` / `→`  | `Ctrl+Home` / `Ctrl+End`            | start / end of document                                                                         |
 | `Search` + `[` / `]`           | `Super+Page_Up` / `Super+Page_Down` | previous / next workspace                                                                       |
 | `Search` + `Shift` + `[` / `]` | `Super+Shift+Page_Up` / `…_Down`    | move window to previous / next workspace                                                        |
 | `Search` + `Alt`               | `Caps Lock`                         | Caps Lock (either order)                                                                        |
+
+ChromeOS numbers top-row key *n* as `F(n-1)`, so the ten media keys are F1–F10
+and the menu key, being key #12, is F11. F12 is the only F-key with no slot on
+the keyboard, so it takes one extra modifier (Shift). `F11` is left unbound at
+the compositor level, so applications receive it.
 
 ## Alt held
 
